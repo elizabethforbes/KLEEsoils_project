@@ -1,0 +1,624 @@
+---
+title: "TOCcalcs_2017incs_ForbesMoore"
+author: "Elizabeth Forbes"
+date: "11/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$
+set(echo = TRUE)
+```
+
+# Data: explanation and pre-analysis plan
+
+Here is the initial data exploration and subsequent analysis of the results from Schimadzu TOC analysis of soil samples from the KLEE. Samples were collected in summer 2016 (~July) and stored (dried) until June 2017, when they were incubated for 7 days, then extracted using a chloroform fumigation method (with REU student Dana Moore). Here I am concerned with exploring:
+- total organic carbon and nitrogen across treatments, landscape features, and (treatments * features)
+- total carbon flush ("microbial biomass" carbon) across treatments, landscape features, and (treatments * features)
+- total nitrogen flush ("microbial biomass" nitrogen) across treatments, landscape features, and (treatments * features)
+
+First, import and clean data.
+```{r data import, cleaning}
+library(tidyverse)
+library(janitor) # use to cleanup column names into R-friendly terms
+library(ggbeeswarm) 
+library(calecopal) # fun CA colors for graphs
+
+# toc_all <- read_csv("TOCdat_calcs_Nov2019.csv") %>% 
+#   clean_names()
+toc_all <- read_csv("TOCdat_calcs_May2020.csv") %>% 
+  clean_names()
+# extract just those columns that will be used for analysis
+toc <- toc_all[, c(1:4, 27:32)]
+# rename columns:
+newnames <- c("ID", "repl", "feature", "trtmnt", "NPOC_fume", "NPOC_nonfume", "TN_fume", "TN_nonfume", "NPOC_flush", "TN_flush")
+colnames(toc) <- newnames
+
+# data are being read as characters; coerce to numeric for last six columns
+cols <- c("NPOC_fume", "NPOC_nonfume", "TN_fume", "TN_nonfume", "NPOC_flush", "TN_flush")
+toc[,cols] <- lapply(toc[,cols], as.numeric)
+toc <- toc %>% drop_na()
+
+# replace any negative values generated for NPOC or TN flushes with NA's; this is impossible, and therefore likely an error.
+library(dplyr)
+toc <- toc %>% mutate(NPOC_flush = replace(NPOC_flush, which(NPOC_flush<0), NA))
+toc <- toc %>% mutate(TN_flush = replace(TN_flush, which(TN_flush<0), NA))
+# for nitrogen anyway, the values that produced negative TN flushes were just REALLY close together.  (E.g. TN_fume and TN_nonfume were close together.)
+```
+# Data visualization: explore pattern
+
+Let's see what some of these data look like, and run some analytics to determine what sort of structure the data is in (e.g. normality, etc.).  That will help determine what statistical tests are appropriate on the back end.
+
+```{r}
+library(ggplot2)
+## BY TREATMENT:
+# soil carbon, non-fumigated:
+toc %>% 
+  ggplot(aes(x=trtmnt, y=NPOC_nonfume, fill=trtmnt))+
+  geom_violin()
+# soil nitrogen, non-fumigated:
+toc %>% 
+  ggplot(aes(x=trtmnt, y=TN_nonfume, fill=trtmnt))+
+  geom_violin()
+# microbial carbon:
+toc %>% 
+  ggplot(aes(x=trtmnt, y=NPOC_flush, fill=trtmnt))+
+  geom_violin()
+# microbial nitrogen:
+toc %>% 
+  ggplot(aes(x=trtmnt, y=TN_flush, fill=trtmnt))+
+  geom_violin()
+
+# BY LANDSCAPE FEATURE:
+# soil carbon, non-fumigated:
+toc %>% 
+  ggplot(aes(x=feature, y=NPOC_nonfume, fill=feature))+
+  geom_violin()
+# soil nitrogen, non-fumigated:
+toc %>% 
+  ggplot(aes(x=feature, y=TN_nonfume, fill=feature))+
+  geom_violin()
+# microbial carbon:
+toc %>% 
+  ggplot(aes(x=feature, y=NPOC_flush, fill=feature))+
+  geom_violin()
+# microbial nitrogen:
+toc %>% 
+  ggplot(aes(x=feature, y=TN_flush, fill=feature))+
+  geom_violin()
+
+```
+# Normal?
+
+Testing to see if data are normally distributed w/ Shapiro Wilkes test.
+http://www.sthda.com/english/wiki/normality-test-in-r
+```{r}
+library(dplyr)
+library(ggpubr)
+
+# run through a density plot for each unfumigated NPOC and TN, as well as microbial flush for both.
+library(ggplot2)
+#NPOC_flush:
+ggplot(toc, aes(x = NPOC_flush)) + 
+  geom_density() + 
+  facet_wrap(trtmnt~feature)
+#TN_flush:
+ggplot(toc, aes(x = TN_flush)) + 
+  geom_density() + 
+  facet_wrap(trtmnt~feature)
+#soil C:
+ggplot(toc, aes(x = NPOC_nonfume)) + 
+  geom_density() + 
+  facet_wrap(trtmnt~feature)
+#soil N:
+ggplot(toc, aes(x = TN_nonfume)) + 
+  geom_density() + 
+  facet_wrap(trtmnt~feature)
+
+shapiro.test(toc$NPOC_nonfume)
+# W = 0.49342, p-value < 2.2e-16; data likely non-normal
+shapiro.test(toc$TN_nonfume)
+# W = 0.59315, p-value < 2.2e-16; data likely non-normal
+shapiro.test(toc$NPOC_flush)
+# W = 0.59913, p-value < 2.2e-16; data likely non-normal
+shapiro.test(toc$TN_flush)
+# W = 0.75206, p-value < 2.2e-16; data likely non-normal
+```
+```{r bargraph_means}
+# just to see what we're looking at, I'm going to average the data by treatment, and then feature, and looking at bar graphs.
+library(plyr)
+library(ggplot2)
+library(tidyverse)
+# by treatment, fill in with NPOC_flush or NPOC_nonfume, same for TN depending on what you want to graph:
+library(calecopal)
+pal <- cal_palette("figmtn", 4)
+trtmnt_sum <- ddply(toc, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_nonfume)),
+               mean = mean(NPOC_nonfume, na.rm=TRUE),
+               sd   = sd(NPOC_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+# reorder by factor (treatment):
+trtmnt_sum$trtmnt <- factor(trtmnt_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+trtmnt_sum %>% 
+  ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)
+  # ylim(0,35)
+
+# by feature
+pal <- cal_palette("kelp1", 3)
+feat_sum <- ddply(toc, c("feature"), summarise,
+               N    = sum(!is.na(NPOC_flush)),
+               mean = mean(NPOC_flush, na.rm=TRUE),
+               sd   = sd(NPOC_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+# reorder by factor (soil type):
+feat_sum$feature <- factor(feat_sum$feature, levels = c("OS", "UT", "OM"))
+feat_sum %>% 
+  ggplot(aes(x=feature, y=mean, fill=feature))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)
+```
+
+```{r boxplots}
+pal <- cal_palette("kelp1", 4)
+
+toc %>% 
+  ggplot(aes(x=feature, y=NPOC_nonfume, fill = feature))+
+  geom_boxplot()+
+  geom_jitter(color="black", size=0.5, alpha=0.5)+
+  theme_bw()+
+  scale_fill_manual(values = pal)
+  # facet_wrap(~trtmnt)
+
+```
+
+
+
+# Notes on potential solutions for analyzing non-normal data:
+https://bookdown.org/ndphillips/YaRrr/regression-on-non-normal-data-with-glm.html
+https://rpubs.com/kaz_yos/glm-Gamma
+
+I do also have far over 30 samples per treatment, depending on how things get separated out.  worth exploring this; perhaps parametric testing is okay in this case?
+
+But there's also the issue of outliers...are these real?  
+
+Realizing just now that I haven't checked the normality of each independent group of data, just the total.
+
+```{r normality by group}
+# subset by treatment
+tocO <- subset(toc, trtmnt=="O", select = c(1:10))
+tocC <- subset(toc, trtmnt=="C", select = c(1:10))
+tocMW <- subset(toc, trtmnt=="MW", select = c(1:10))
+tocMWC <- subset(toc, trtmnt=="MWC", select = c(1:10))
+
+tocOS <- subset(toc, feature=="OS", select = c(1:10))
+tocUT <- subset(toc, feature=="UT", select = c(1:10))
+tocOM <- subset(toc, feature=="OM", select = c(1:10))
+
+
+# test each group for normality
+library(dplyr)
+install.packages("ggpubr")
+library(ggpubr)
+
+# run through a density plot for each unfumigated NPOC and TN, as well as microbial flush for both.
+ggdensity(tocOS$NPOC_flush, 
+          main = "TN content of soil",
+          xlab = "TN")
+ggqqplot(tocOS$NPOC_flush)
+# oooookay, data are super non-normally distributed!  Looks more like a gamma distribution for each.  Could still get away with a glm() regression, rather than an lm().
+
+shapiro.test(tocOM$NPOC_nonfume)
+shapiro.test(tocOM$TN_nonfume)
+shapiro.test(tocOM$NPOC_flush)
+shapiro.test(tocOM$TN_flush)
+# for O: all non-normally distributed
+# for C: all non-normally distributed
+# for MW: all non-normally distributed
+# for MWC: all non-normally distributed
+
+# all landscape features also non-normally distributed.  drat.  non-parametric tests it is.
+
+# # histograms for fun:
+# hist(tocMWC$NPOC_flush, breaks=100, freq=FALSE,
+#      # xlim=c(, 1.1), ylim=c(0, 2.5),
+#      main='Case 1: Normal Errors', xlab='Coefficient Estimation')
+# curve(dnorm(x, mean=mean(tocMWC$NPOC_flush), sd=sd(tocMWC$NPOC_flush)),
+#       col='red', lwd=3, add=TRUE)
+# # abline(v=0.3, col='abred', lwd=3)
+```
+```{r just OS data by treatment}
+# here I want to do some exploratory analyses of JUST the OS (or, for lack of a better term, the 'regular' soils) across treatments.  They're sort of the control soils as opposed to OM and UT.
+
+# set color palette
+pal <- cal_palette("figmtn", 4)
+
+# summarize OS unfumigated (i.e. extractable soil carbon) data by treatment:
+OS_nonfumeNPOC_sum <- ddply(tocOS, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_nonfume)),
+               mean = mean(NPOC_nonfume, na.rm=TRUE),
+               sd   = sd(NPOC_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+
+# reorder by factor (treatment):
+OS_nonfumeNPOC_sum$trtmnt <- factor(OS_nonfumeNPOC_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+
+# bar graph of results:
+os1 <- OS_nonfumeNPOC_sum %>% 
+  ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,175)+
+  ggtitle("OS soils, extractable soil carbon:")+
+  theme(legend.position = "none")
+
+################# summarize OS fumigated (i.e. extractable microbial carbon) data by treatment:
+
+OS_NPOCflush_sum <- ddply(tocOS, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_flush)),
+               mean = mean(NPOC_flush, na.rm=TRUE),
+               sd   = sd(NPOC_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+
+# reorder by factor (treatment):
+OS_NPOCflush_sum$trtmnt <- factor(OS_NPOCflush_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+
+# bar graph of results:
+os2 <- OS_NPOCflush_sum %>% 
+  ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,175)+
+  ggtitle("OS soils, extractable microbial carbon:")+
+  theme(legend.position = "none")
+
+################ # summarize OS unfumigated, but this time extractable soil nitrogen, data by treatment:
+
+OS_TNnonfume_sum <- ddply(tocOS, c("trtmnt"), summarise,
+               N    = sum(!is.na(TN_nonfume)),
+               mean = mean(TN_nonfume, na.rm=TRUE),
+               sd   = sd(TN_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+
+# reorder by factor (treatment):
+OS_TNnonfume_sum$trtmnt <- factor(OS_TNnonfume_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+
+# bar graph of results:
+os3 <- OS_TNnonfume_sum %>% 
+  ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,175)+
+  ggtitle("OS soils, extractable soil nitrogen:")+
+  theme(legend.position = "none")
+
+################
+# summarize OS fumigated (i.e. extractable microbial nitrogen) data by treatment:
+OS_TNflush_sum <- ddply(tocOS, c("trtmnt"), summarise,
+               N    = sum(!is.na(TN_flush)),
+               mean = mean(TN_flush, na.rm=TRUE),
+               sd   = sd(TN_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+
+# reorder by factor (treatment):
+OS_TNflush_sum$trtmnt <- factor(OS_TNflush_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+
+# bar graph of results:
+os4 <- OS_TNflush_sum %>% 
+  ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,175)+
+  ggtitle("OS soils, extractable microbial nitrogen:")+
+  theme(legend.position = "none")
+
+# arrange four graphs together
+install.packages("ggpubr")
+library(ggpubr)
+
+ggarrange(os1, os2, os3, os4,
+          labels = c("A", "B", "C", "D"),
+          ncol = 2, nrow = 2)
+
+```
+Doesn't look terribly like there are differences across treatment in just the OS soils (though of course will need to run analyses).  Will do a similar visualization for UT and OM below:
+
+```{r UT data by treatment}
+# summarize all UT data:
+UT_NPOCnonfume_sum <- ddply(tocUT, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_nonfume)),
+               mean = mean(NPOC_nonfume, na.rm=TRUE),
+               sd   = sd(NPOC_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+UT_NPOCflush_sum <- ddply(tocUT, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_flush)),
+               mean = mean(NPOC_flush, na.rm=TRUE),
+               sd   = sd(NPOC_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+UT_TNnonfume_sum <- ddply(tocUT, c("trtmnt"), summarise,
+               N    = sum(!is.na(TN_nonfume)),
+               mean = mean(TN_nonfume, na.rm=TRUE),
+               sd   = sd(TN_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+UT_TNflush_sum <- ddply(tocUT, c("trtmnt"), summarise,
+               N    = sum(!is.na(TN_flush)),
+               mean = mean(TN_flush, na.rm=TRUE),
+               sd   = sd(TN_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+
+# reorder by factor (treatment):
+UT_NPOCnonfume_sum$trtmnt <- factor(UT_NPOCnonfume_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+UT_NPOCflush_sum$trtmnt <- factor(UT_NPOCflush_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+UT_TNnonfume_sum$trtmnt <- factor(UT_TNnonfume_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+UT_TNflush_sum$trtmnt <- factor(UT_TNflush_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+
+library(ggpubr)
+# graph and arrange
+ut1 <- UT_NPOCnonfume_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,260)+
+  ggtitle("UT soils, extractable soil carbon:")+
+  theme(legend.position = "none")
+ut2 <- UT_NPOCflush_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,260)+
+  ggtitle("UT soils, extractable microbial carbon:")+
+  theme(legend.position = "none")
+ut3 <- UT_TNnonfume_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,260)+
+  ggtitle("UT soils, extractable soil nitrogen:")+
+  theme(legend.position = "none")
+ut4 <- UT_TNflush_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,260)+
+  ggtitle("UT soils, extractable microbial nitrogen:")+
+  theme(legend.position = "none")
+
+ggarrange(ut1, ut2, ut3, ut4,
+          labels = c("A", "B", "C", "D"),
+          ncol = 2, nrow = 2)
+```
+Now OM:
+```{r OM data by treatment}
+# summarize all UT data:
+OM_NPOCnonfume_sum <- ddply(tocOM, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_nonfume)),
+               mean = mean(NPOC_nonfume, na.rm=TRUE),
+               sd   = sd(NPOC_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+OM_NPOCflush_sum <- ddply(tocOM, c("trtmnt"), summarise,
+               N    = sum(!is.na(NPOC_flush)),
+               mean = mean(NPOC_flush, na.rm=TRUE),
+               sd   = sd(NPOC_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+OM_TNnonfume_sum <- ddply(tocOM, c("trtmnt"), summarise,
+               N    = sum(!is.na(TN_nonfume)),
+               mean = mean(TN_nonfume, na.rm=TRUE),
+               sd   = sd(TN_nonfume, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+OM_TNflush_sum <- ddply(tocOM, c("trtmnt"), summarise,
+               N    = sum(!is.na(TN_flush)),
+               mean = mean(TN_flush, na.rm=TRUE),
+               sd   = sd(TN_flush, na.rm=TRUE),
+               se   = sd / sqrt(N)
+)
+
+# reorder by factor (treatment):
+OM_NPOCnonfume_sum$trtmnt <- factor(OM_NPOCnonfume_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+OM_NPOCflush_sum$trtmnt <- factor(OM_NPOCflush_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+OM_TNnonfume_sum$trtmnt <- factor(OM_TNnonfume_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+OM_TNflush_sum$trtmnt <- factor(OM_TNflush_sum$trtmnt, levels = c("MWC", "MW", "C", "O"))
+
+library(ggpubr)
+# graph and arrange
+om1 <- OM_NPOCnonfume_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,150)+
+  ggtitle("OM soils, extractable soil carbon:")+
+  theme(legend.position = "none")
+om2 <- OM_NPOCflush_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,150)+
+  ggtitle("OM soils, extractable microbial carbon:")+
+  theme(legend.position = "none")
+om3 <- OM_TNnonfume_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,150)+
+  ggtitle("OM soils, extractable soil nitrogen:")+
+  theme(legend.position = "none")
+om4 <- OM_TNflush_sum %>% ggplot(aes(x=trtmnt, y=mean, fill=trtmnt))+
+  geom_bar(stat="identity", position = "dodge")+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values = pal)+
+  ylim(0,150)+
+  ggtitle("OM soils, extractable microbial nitrogen:")+
+  theme(legend.position = "none")
+
+ggarrange(om1, om2, om3, om4,
+          labels = c("A", "B", "C", "D"),
+          ncol = 2, nrow = 2)
+```
+
+Looking at basic lm to assess normality/homogeneity of residuals:
+```{r model assumptions}
+# remove NAs otherwise plotting residuals will thrown an error
+toc2 <- toc[complete.cases(toc),]
+# basic linear model with interaction
+m1 <- lm(NPOC_flush ~ trtmnt*feature, data=toc2)
+plot(m1, which=c(1), col=1, add.smooth=FALSE, caption = "")
+res <- resid(m1)
+feat <- factor(toc2$feature)
+trt <- factor(toc2$trtmnt)
+# plot residuals against each categorical variable:
+plot(feat, res, xlab="feature", ylab="residuals")
+plot(trt, res, xlab="treatment", ylab="residuals")
+
+# below I'm modeling microbial biomass as a function of soil C...just to play around.
+# m2 <- lm(NPOC_flush~trtmnt*NPOC_nonfume, data=toc2)
+# plot(m2, which=c(1), col=1, add.smooth=FALSE, caption = "") #microbial biomass variability increases with increasing soil carbon
+# plot(feat, resid(m2), xlab="feature", ylab="residuals")
+# plot(trt, resid(m2), xlab="treatment", ylab="residuals")
+```
+
+
+Okay so now I need to go through options for analysis of multivariate data that is non-normally distributed.
+```{r glm}
+# GLMs (generalized linear models) allow you to model your data with a linear regression, when your dependent variable is non-normal.
+install.packages("faraway")
+library(faraway)      # glm support
+library(MASS)         # negative binomial support
+library(car)          # regression functions
+library(lme4)         # random effects
+library(ggplot2)      # plotting commands
+library(reshape2)     # wide to tall reshaping
+library(xtable)       # nice table formatting
+library(knitr)        # kable table formatting
+library(grid)         # units function for ggplot
+
+toc$trtmnt <- factor(toc$trtmnt, levels=c("MWC", "MW", "C", "O"))
+toc$feature <- factor(toc$feature, levels=c("OS", "UT", "OM"))
+mod1 <- glm(NPOC_flush~trtmnt*feature, data=toc, family = Gamma)
+summary(mod1)
+# none of the interactions are significant, so removing the interaction term from the model to create the following nested (i.e. reduced) model:
+mod2 <- glm(NPOC_flush~trtmnt+feature, data=toc, family=Gamma)
+summary(mod2)
+# AIC is eeeever so slightly lower (4036 versus 4041) so this model fits ... eeeeever so slightly better, right?
+# compare the models: is one a better fit than the other?
+anova(mod1, mod2)
+anova(mod1, mod2, test="Chisq")
+# plot the deviance residuals:
+library(boot)
+glm.diag.plots(mod1)
+glm.diag.plots(mod2)
+
+```
+
+ideas: 
+stratify treatment data by soil type (e.g. the weekend vs weekday example) (reason to do this?)
+log-transform all the data to remove right-skew, use parametric comparison
+stick with GLM?
+
+how to incorporate random effects into the model? (e.g. N, C, S)
+do the four result streams covary?  how to do non-normal ANCOVA?
+
+# cycling through analysis ideas: log-transforming the data
+Here I'm going to try and log-transform my non-normal data to see if I can use a more traditional, parametric analysis like ANOVA or a regular linear mixed-effects model.
+```{r}
+
+```
+
+# cycling through analysis ideas: running an lmm and checking the residuals for normality
+Here I'm going to try running an LMM (linear mixed model) and checking the residuals to see if they're normal.  If so, could potentially stick with that method. What I end up doing here is a) log-normal transforming the data (see below). I also b) had a revelation that perhaps we should be nesting soiltype (feature) within treatment?  Looking at the bar graph of the data above, it does seem as though there is a greater difference 
+I used a lot of the code from this primer guide to mixed effects models: https://ase.tufts.edu/gsc/gradresources/guidetomixedmodelsinr/mixed%20model%20guide.html
+
+
+
+
+
+
+
+PARKING LOT FOR ANALYSES I'VE TRIED FOR SOME REASON (THE REASON IS STACKOVERFLOW)
+```{r}
+library(car)
+library(MASS)
+qqp(toc$NPOC_flush)
+
+#lnorm = log normal
+qqp(toc$NPOC_flush, "lnorm")
+# estimate parameters of gamm distribution, save, plot with qqp to test gamma distribution fit
+gam <- fitdistr(na.exclude(toc$NPOC_flush), "gamma")
+qqp(toc$NPOC_flush, "gamma", shape = gam$estimate[[1]], rate=gam$estimate[[2]])
+# don't need to try Poisson (needs non-negative integer data only) and negative binomial (because...my data aren't that).
+
+# for ENTIRE npoc_flush dataset (not separated by treatment), it looks like the log normal distribution provides the best fit.  interesting.
+# look at distribution testing by treatment:
+#O
+qqp(tocO$NPOC_flush)
+qqp(tocO$NPOC_flush, "lnorm") # better fit
+gam <- fitdistr(na.exclude(tocO$NPOC_flush), "gamma")
+qqp(tocO$NPOC_flush, "gamma", shape = gam$estimate[[1]], rate=gam$estimate[[2]])
+#C
+qqp(tocC$NPOC_flush)
+qqp(tocC$NPOC_flush, "lnorm") # better fit
+gam <- fitdistr(na.exclude(tocC$NPOC_flush), "gamma")
+qqp(tocC$NPOC_flush, "gamma", shape = gam$estimate[[1]], rate=gam$estimate[[2]])
+#MW
+qqp(tocMW$NPOC_flush)
+qqp(tocMW$NPOC_flush, "lnorm") # better fit
+gam <- fitdistr(na.exclude(tocMW$NPOC_flush), "gamma")
+qqp(tocMW$NPOC_flush, "gamma", shape = gam$estimate[[1]], rate=gam$estimate[[2]])
+#MWC
+qqp(tocMWC$NPOC_flush)
+qqp(tocMWC$NPOC_flush, "lnorm") # better fit
+gam <- fitdistr(na.exclude(tocMWC$NPOC_flush), "gamma")
+qqp(tocMWC$NPOC_flush, "gamma", shape = gam$estimate[[1]], rate=gam$estimate[[2]])
+
+# for all treatments, still looks like log normal distribution is the best fit.
+# try using a penalized quasilikelihood (PQL); PQL is a flexible technique that can deal with non-normal data, unbalanced design, and crossed random effects. Here, test two formulas: one full (trtmnt*feature) and one reduced (trtmnt + feature) but both with the random effect of replicate (N, C, or S). setting the pql family to gaussian with link "log" to set the distribution to log-normal.
+PQL1 <- glmmPQL(NPOC_flush ~ trtmnt * feature, ~1 | repl, family = gaussian(link = "log"),
+    data = toc, verbose = FALSE)
+PQL2 <- glmmPQL(NPOC_flush ~ trtmnt + feature, ~1 | repl, family = gaussian(link = "log"),
+    data = toc, verbose = FALSE)
+# Here is something I have not considered; do I need to (experimentally speaking) nest feature within treatment type?
+PQL3 <- glmmPQL(NPOC_flush ~ trtmnt/feature, ~1 | repl, family = gaussian(link = "log"),
+    data = toc, verbose = FALSE)
+summary(PQL1)
+summary(PQL2)
+summary(PQL3)
+# interesting result here; seems as tho the only 'significant' drivers of change for UT occurred in MWC and C (treatments with cattle).  That's...fascinating, if it's real and this is the right way to code the model.  and would be interesting to compare with jar incubation data.
+
+# the issue with GLMMs is that they don't give you AIC, BIC; still not sure why (too much math today) but it's difficult to do quantitative model comparison/selection without them.  In addition, I think I need to logically decide whether or not to nest feature within treatment for all future models; that isn't so much an issue of model selection as it is an issue of the experimental design of the KLEE and my sample collection.  time to stop this and start pondering that further...once that's decided I can proceed with model selection.
+
+```
+
+
+

@@ -1,0 +1,931 @@
+---
+title: "pool_calculations"
+author: "Elizabeth Forbes"
+date: "7/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pool calculations
+
+This markdown is a shorter one using existing data on:
+- soil concentrations of DOC, DON, microbial DOC, and microbial DON across OS, UT, and OM
+- bulk density estimates for OS, UT, and OM
+- soil sample depth (0-5cm or 0.05m)
+- proportion of each OS, UT, and OM per KLEE treatment
+
+```{r data_setup}
+# https://www.agric.wa.gov.au/soil-carbon/measuring-and-reporting-soil-organic-carbon
+
+######## non-averaged df
+# change name for manipulating:
+poolsdat <- toc_fourvar
+
+# if we want to look at TOTAL extractable carbon, including the microbial carbon:
+# poolsdat_2 <- toc[,-c(7)]
+# add column for microbial C:N ratio (aka ratio of fungus to bacteria):
+poolsdat$mic_cn_ratio <- poolsdat$NPOC_flush / poolsdat$TN_flush
+
+# change column names for ease of visualiztion:
+colnames <- c("ID", "repl", "feature", "treatment", "soilC", "soilN", "micC", "micN", "micCN") # remember all concentrations are currently in mg/kg soil
+
+colnames(poolsdat) <- colnames
+# colnames(poolsdat_2) <- colnames_2
+
+# melt to vertical dataframe
+library(tidyr)
+poolsdat_long <- gather(poolsdat, soil_variable, value_mg_kg, 5:9)
+# poolsdat_long2 <- gather(poolsdat_2, soil_variable, value_mg_kg, 5:10)
+
+# convert each soil variable (except ratio, which we'll visualize with the original data) to mg/g
+poolsdat_long$value_mg_g <- (poolsdat_long$value_mg_kg)/1000
+
+# add feature-specific bulk densities to the long-form dataframe:
+poolsdat_long <- poolsdat_long %>%
+  mutate(bd_g_cm3 =
+           case_when(feature == "OS" ~1.1344250,  # average bulk density for OS, g/cm3
+                     feature == "UT" ~1.1344250,  # average bulk density for UT, g/cm3
+                     feature == "OM" ~0.9861583)) # average bulk density for OM, g/cm3
+
+# add depth of the horizon layer from which samples were taken (5cm aka 0.05m)
+poolsdat_long$depth_cm <- 5
+```
+
+Next, calculate the sampling-site-specific pools of carbon in kg/m2:
+```{r pool_calc}
+# multiply each soil variable (mg/g) by bulk density (g/cm3) and depth (cm) to get pool of each per sample in mg/cm2:
+poolsdat_long$pool_mg_cm2 <-
+  poolsdat_long$value_mg_g * poolsdat_long$bd_g_cm3 * poolsdat_long$depth_cm
+
+# divide by 100 to convert mg/cm2 to kg/m2:
+poolsdat_long$pool_kg_m2 <- poolsdat_long$pool_mg_cm2/100
+
+```
+
+calculate treatment-level pools of carbon with proportional area for each:
+```{r by_treatment}
+# multiply each line of this dataframe by the proportional m2 of each feature per treatment for each feature ... first need to calculate that for each treatment.
+# view averages from proportional calculation, done in soilbulkdensities_proportion markdown:
+# View(feature_summary)
+
+# create long case_when statement to assign these values to their associated row:
+poolsdat_long <- poolsdat_long %>% 
+  mutate(percent_area = # first create a column with percent area of each feature
+           case_when((feature == "OS" & treatment == "MWC") ~ 80.03917,      # average number of m2 of OS soil in MWC
+                     (feature == "OS" & treatment == "MW") ~ 69.74667,       # average number of m2 of OS soil in MW
+                     (feature == "OS" & treatment == "C") ~ 58.22250,        # average number of m2 of OS soil in C
+                     (feature == "OS" & treatment == "O") ~ 58.91369,        # average number of m2 of OS soil in O
+                     (feature == "OM" & treatment == "MWC") ~ 1.927500,      # average number of m2 of OM soil in MWC
+                     (feature == "OM" & treatment == "MW") ~ 2.180000,       # average number of m2 of OM soil in MW
+                     (feature == "OM" & treatment == "C") ~ 2.324167,        # average number of m2 of OM soil in C
+                     (feature == "OM" & treatment == "O") ~ 1.772979,        # average number of m2 of OM soil in O
+                     (feature == "UT" & treatment == "MWC") ~ 18.03333,      # average number of m2 of UT soil in MWC
+                     (feature == "UT" & treatment == "MW") ~ 28.07333,       # average number of m2 of UT soil in MW
+                     (feature == "UT" & treatment == "C") ~ 39.45333,        # average number of m2 of UT soil in C
+                     (feature == "UT" & treatment == "O") ~ 39.31333))       # average number of m2 of UT soil in O
+
+# calculate square meters of each feature given percent of each treatment plot given that they're each 4ha in size, or 40k square meters:
+poolsdat_long$squaremeters_area <- ((poolsdat_long$percent_area)/100)*40000 # convert % to decimal, multiply by 4ha in meters square
+
+# Calculate total number of kg of each variable in each treatment plot, per feature, by multiplying each variable (in kg/m2) by the total number of square meters for each feature per treatment plot
+poolsdat_long$pool_kg_total <- poolsdat_long$pool_kg_m2 * poolsdat_long$squaremeters_area
+
+# divide by 4ha to get kg/ha: pools of each at SAMPLING LOCATIONS on average
+poolsdat_long$pool_kg_ha <- poolsdat_long$pool_kg_total/4
+
+```
+
+
+Visualization of pools, by treatment but grouped by feature, first just pools (SAMPLING LOCATION SPECIFIC) dissolved organic carbon in soils:
+```{r viz_soilC}
+# visualize SAMPLING LOCATION-LEVEL soil carbon:
+library(ggpubr)
+# isolate soil C data:
+soilC_long <- poolsdat_long %>% 
+  filter(soil_variable == "soilC")
+
+mypalette <- c("#E69F00", "#009E73", "#D55E00")
+
+# barplot of pools in each treatment, AVERAGE AT EACH SAMPLING LOCATION (i.e. not plot-level): 
+# plot:
+g <- ggbarplot(soilC_long, x = "feature", y = "pool_kg_m2", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil DOC, kg/m2")+
+  scale_fill_manual("",  
+                      # labels = c("OS" = "open soil", 
+                        labels = c("OS" = "interspace",
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)+
+                      theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+ggpar(g, legend = "right")
+
+# same models as with concentration data, just on the per-unit-area equivalent:
+lmm_doc_perarea <- lmerTest::lmer(log(pool_kg_m2) ~ feature+treatment + (1|repl), data = soilC_long)
+summary(lmm_doc_perarea)
+anova(lmm_doc_perarea) # p = 0.0006 for feature; p = 0.062 for treatment
+plot(lmm_doc_perarea)
+hist(resid(lmm_doc_perarea)) # residuals of the model look good
+# calculate estimated marginal means and pairwise comparisons for soil DOC
+emm_DOC <- emmeans(lmm_doc_perarea, specs = pairwise ~ "feature")
+summary(emm_DOC)
+emm_DOC$contrasts # remember that this model is on log-scale data, so p-values are reflective of that
+ # contrast estimate     SE  df t.ratio p.value
+ # OS - UT    -0.136 0.0609 345  -2.228  0.0679
+ # OS - OM    -0.238 0.0619 345  -3.852  0.0004
+ # UT - OM    -0.103 0.0619 345  -1.659  0.2226
+
+```
+
+```{r viz_soilC2}
+######### with proportional area in mind:
+ggbarplot(soilC_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil DOC pool, scaled by feature area, kg/ha")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)
+
+```
+
+Visualize soil DON, MBC, MBN too: Here, SAMPLING LOCATION-LEVEL POOLS:
+```{r viz_soilN}
+# visualize soil nitrogen:
+poolsdat_long %>% 
+  filter(soil_variable == "soilN") %>% 
+  ggplot(aes(treatment, pool_kg_ha))+
+  geom_boxplot(outlier.color = "red", outlier.shape = 1, aes(color = treatment))+
+  theme_classic()
+
+# isolate soil N data:
+soilN_long <- poolsdat_long %>% 
+  filter(soil_variable == "soilN")
+
+# barplot of pools in each treatment, AVERAGE AT EACH SAMPLING LOCATION (i.e. not plot-level): 
+# plot:
+g <- ggbarplot(soilN_long, x = "feature", y = "pool_kg_m2", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil DON, kg/m2")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)+
+                      theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+ggpar(g, legend = "right")
+
+# same models as with concentration data, just on the per-unit-area equivalent:
+lmm_ten_perarea <- lmerTest::lmer(log(pool_kg_m2) ~ feature+treatment + (1|repl), data = soilN_long)
+summary(lmm_ten_perarea)
+anova(lmm_ten_perarea) # p <<<< 0.001 for feature; p = 0.008 for treatment
+plot(lmm_ten_perarea)
+hist(resid(lmm_ten_perarea)) # residuals of the model look good
+# calculate estimated marginal means and pairwise comparisons for soil DOC
+emm_TEN <- emmeans(lmm_ten_perarea, specs = pairwise ~ "feature")
+summary(emm_TEN)
+emm_TEN$contrasts
+# contrast estimate     SE  df t.ratio p.value
+#  OS - UT    -0.679 0.0801 345  -8.477  <.0001
+#  OS - OM    -0.270 0.0814 345  -3.317  0.0029
+#  UT - OM     0.409 0.0814 345   5.027  <.0001
+```
+
+```{r viz_soilN}
+######### with proportional area in mind:
+
+ggbarplot(soilN_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil DON pool, scaled by feature area, kg/ha")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)
+```
+
+```{r viz_micC}
+# visualize microbial carbon:
+poolsdat_long %>% 
+  filter(soil_variable == "micC") %>% 
+    filter(feature == "OS") %>% 
+  ggplot(aes(treatment, pool_kg_ha))+
+  geom_boxplot(outlier.color = "red", outlier.shape = 1, aes(color = treatment))+
+  theme_classic()
+
+# isolate MBC data:
+micC_long <- poolsdat_long %>% 
+  filter(soil_variable == "micC")
+
+# barplot of pools in each treatment, AVERAGE AT EACH SAMPLING LOCATION (i.e. not plot-level): 
+# plot:
+g <- ggbarplot(micC_long, x = "feature", y = "pool_kg_m2", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil MBC, kg/m2")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)+
+                      theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+ggpar(g, legend = "right")
+
+# same models as with concentration data, just on the per-unit-area equivalent:
+lmm_mbc_perarea <- lmerTest::lmer(log(pool_kg_m2) ~ feature+treatment + (1|repl), data = micC_long)
+summary(lmm_mbc_perarea)
+anova(lmm_mbc_perarea) # p <<<< 0.001 for feature; p = 0.417 for treatment
+plot(lmm_mbc_perarea)
+hist(resid(lmm_mbc_perarea)) # residuals of the model look good
+# calculate estimated marginal means and pairwise comparisons for soil DOC
+emm_MBC <- emmeans(lmm_mbc_perarea, specs = pairwise ~ "feature")
+summary(emm_MBC)
+emm_MBC$contrasts
+ # contrast estimate     SE  df t.ratio p.value
+ # OS - UT    -0.280 0.0659 341  -4.256  0.0001
+ # OS - OM     0.496 0.0673 341   7.368  <.0001
+ # UT - OM     0.776 0.0674 341  11.512  <.0001
+```
+
+```{r viz_micC2}
+######### with proportional area in mind:
+
+ggbarplot(micC_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil MBC pool, scaled by feature area, kg/ha")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)
+```
+
+```{r viz_micN}
+
+# visualize microbial nitrogen:
+poolsdat_long %>% 
+  filter(soil_variable == "micN") %>% 
+    filter(feature == "OS") %>% 
+  ggplot(aes(treatment, pool_kg_ha))+
+  geom_boxplot(outlier.color = "red", outlier.shape = 1, aes(color = treatment))+
+  theme_classic()
+
+# isolate MBN data:
+micN_long <- poolsdat_long %>% 
+  filter(soil_variable == "micN")
+
+# barplot of pools in each treatment, AVERAGE AT EACH SAMPLING LOCATION (i.e. not plot-level): 
+# plot:
+g <- ggbarplot(micN_long, x = "feature", y = "pool_kg_m2", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil MBN, kg/m2")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)+
+                      theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+ggpar(g, legend = "right")
+
+# same models as with concentration data, just on the per-unit-area equivalent:
+lmm_mbn_perarea <- lmerTest::lmer(log(pool_kg_m2) ~ feature+treatment + (1|repl), data = micN_long)
+summary(lmm_mbn_perarea)
+anova(lmm_mbn_perarea) # p <<<< 0.001 for feature; p = 0.825 for treatment
+plot(lmm_mbn_perarea)
+hist(resid(lmm_mbn_perarea)) # residuals of the model look good
+# calculate estimated marginal means and pairwise comparisons for soil DOC
+emm_MBN <- emmeans(lmm_mbn_perarea, specs = pairwise ~ "feature")
+summary(emm_MBN)
+emm_MBN$contrasts
+ # contrast estimate    SE  df t.ratio p.value
+ # OS - UT    -0.290 0.096 330  -3.017  0.0077
+ # OS - OM     0.351 0.099 330   3.549  0.0013
+ # UT - OM     0.641 0.099 330   6.477  <.0001
+```
+
+```{r viz_micN}
+######### with proportional area in mind:
+
+ggbarplot(micN_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "soil MBN pool, scaled by feature area, kg/ha")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)
+
+```
+
+###################
+POOLS LEVEL SUMMARY
+###################
+
+SUMMARIZE THE DATA BY TREATMENT to calculate treatment-level pools: You've already plotted what those look like (above, in stacked bar plots) but you need to actually calculate the size of those pools and compare statistically.
+
+soil carbon:
+```{r soilC_summarize}
+library("plyr")
+# sum carbon pool for each of the 12 plots in question, by treatment and replicate (you have already summizarized with means in "soilC_agg", but you need to adjust it so it includes replicate as well and is looking at plot-level totals of each response variable (e.g. kg_total)):
+# aggregate data by treatment, feature, and KLEE replicate
+soilC_agg <- ddply(soilC_long, c("treatment", "feature", "repl"), summarise,
+               N    = sum(!is.na(pool_kg_total)),
+               mean = mean(pool_kg_total, na.rm=TRUE),
+               sd   = sd(pool_kg_total, na.rm=TRUE),
+               se   = sd / sqrt(N))
+
+soilC_sum <- ddply(soilC_agg, c("treatment", "repl"), summarize,
+                   sum_totalkg_poolC = sum(mean))
+
+# add column dividing by four (4ha per plot)
+soilC_sum$sum_kgha_C <- soilC_sum$sum_totalkg_poolC/4
+
+# linear model of soilC_sum
+lmm_soilC <- lmer(sum_kgha_C ~ treatment + (1|repl), data = soilC_sum)
+anova(lmm_soilC)
+simulateResiduals(lmm_soilC, plot = TRUE)
+qqnorm(resid(lmm_soilC))
+
+emm_soilC <- emmeans(lmm_soilC, specs = "treatment")
+emm_soilC
+c_soilC <- contrast(emm_soilC, method = "pairwise")
+c_soilC
+
+ggplot_the_response(
+  fit = lmm_soilC,
+  fit_emm = emm_soilC,
+  fit_pairs = c_soilC,
+  palette = pal_okabe_ito_blue,
+  y_label = "treatment-level soil DOC pools, kg/ha"
+)+
+  scale_x_discrete(labels=c("MWC" = "all herbivores", "MW" = "wildlife only", "C" = "cattle only", "O" = "no herbivores"))
+
+
+```
+ 
+soil nitrogen:
+```{r soilN_summarize}
+library("dplyr")
+
+soilN_long <- poolsdat_long %>% filter(soil_variable == "soilN")
+
+# aggregate data by treatment, feature, and KLEE replicate
+soilN_agg <- ddply(soilN_long, c("treatment", "feature", "repl"), summarise,
+               N    = sum(!is.na(pool_kg_total)),
+               mean = mean(pool_kg_total, na.rm=TRUE),
+               sd   = sd(pool_kg_total, na.rm=TRUE),
+               se   = sd / sqrt(N))
+
+# sum nitrgoen pool for each of the 12 plots in question, by treatment and replicate:
+soilN_sum <- ddply(soilN_agg, c("treatment", "repl"), summarize,
+                   sum_totalkg_poolN = sum(mean))
+# add column dividing by four (4ha per plot)
+soilN_sum$sum_kgha_N <- soilN_sum$sum_totalkg_poolN/4
+
+# linear model of soilC_sum
+lmm_soilN <- lmer(sum_kgha_N ~ treatment + (1|repl), data = soilN_sum)
+anova(lmm_soilN)
+simulateResiduals(lmm_soilN, plot = TRUE)
+qqnorm(resid(lmm_soilN))
+
+emm_soilN <- emmeans(lmm_soilN, specs = "treatment")
+emm_soilN
+c_soilN <- contrast(emm_soilN, method = "pairwise")
+c_soilN
+
+ggplot_the_response(
+  fit = lmm_soilN,
+  fit_emm = emm_soilN,
+  fit_pairs = c_soilN,
+  palette = pal_okabe_ito_blue,
+  y_label = "treatment-level soil DON pools, kg/ha"
+)+
+  scale_x_discrete(labels=c("MWC" = "all herbivores", "MW" = "wildlife only", "C" = "cattle only", "O" = "no herbivores"))
+
+```
+
+microbial biomass C:
+```{r micC_summarize}
+library("dplyr")
+
+micC_long <- poolsdat_long %>% filter(soil_variable == "micC")
+
+# aggregate data by treatment, feature, and KLEE replicate
+micC_agg <- ddply(micC_long, c("treatment", "feature", "repl"), summarise,
+               N    = sum(!is.na(pool_kg_total)),
+               mean = mean(pool_kg_total, na.rm=TRUE),
+               sd   = sd(pool_kg_total, na.rm=TRUE),
+               se   = sd / sqrt(N))
+
+# sum microbial biomass C pool for each of the 12 plots in question, by treatment and replicate:
+micC_sum <- ddply(micC_agg, c("treatment", "repl"), summarize,
+                   sum_totalkg_micC = sum(mean))
+
+
+# add column dividing by four (4ha per plot)
+micC_sum$sum_kgha_micC <- micC_sum$sum_totalkg_micC/4
+
+
+# linear model of soilC_sum
+lmm_micC <- lmer(sum_kgha_micC ~ treatment + (1|repl), data = micC_sum)
+anova(lmm_micC)
+simulateResiduals(lmm_micC, plot = TRUE)
+qqnorm(resid(lmm_micC))
+
+emm_micC <- emmeans(lmm_micC, specs = "treatment")
+emm_micC
+c_micC <- contrast(emm_micC, method = "pairwise")
+c_micC
+
+ggplot_the_response(
+  fit = lmm_micC,
+  fit_emm = emm_micC,
+  fit_pairs = c_micC,
+  palette = pal_okabe_ito_blue,
+  y_label = "treatment-level microbial biomass carbon pools, kg/ha"
+)+
+  scale_x_discrete(labels=c("MWC" = "all herbivores", "MW" = "wildlife only", "C" = "cattle only", "O" = "no herbivores"))
+
+```
+
+microbial biomass N:
+```{r micC_summarize}
+library("dplyr")
+
+micN_long <- poolsdat_long %>% filter(soil_variable == "micN")
+
+# aggregate data by treatment, feature, and KLEE replicate
+micN_agg <- ddply(micN_long, c("treatment", "feature", "repl"), summarise,
+               N    = sum(!is.na(pool_kg_total)),
+               mean = mean(pool_kg_total, na.rm=TRUE),
+               sd   = sd(pool_kg_total, na.rm=TRUE),
+               se   = sd / sqrt(N))
+
+# sum microbial biomass N pool for each of the 12 plots in question, by treatment and replicate:
+micN_sum <- ddply(micN_agg, c("treatment", "repl"), summarize,
+                   sum_totalkg_micN = sum(mean))
+# add column dividing by four (4ha per plot)
+micN_sum$sum_kgha_micN <- micN_sum$sum_totalkg_micN/4
+
+
+# linear model of soilN_sum
+lmm_micN <- lmer(sum_kgha_micN ~ treatment + (1|repl), data = micN_sum)
+anova(lmm_micN)
+simulateResiduals(lmm_micN, plot = TRUE)
+qqnorm(resid(lmm_micN))
+
+emm_micN <- emmeans(lmm_micN, specs = "treatment")
+emm_micN
+c_micN <- contrast(emm_micN, method = "pairwise")
+c_micN
+
+ggplot_the_response(
+  fit = lmm_micN,
+  fit_emm = emm_micN,
+  fit_pairs = c_micN,
+  palette = pal_okabe_ito_blue,
+  y_label = "treatment-level microbial biomass nitrogen pools, kg/ha"
+)+
+  scale_x_discrete(labels=c("MWC" = "all herbivores", "MW" = "wildlife only", "C" = "cattle only", "O" = "no herbivores"))
+
+```
+
+
+August 13th, 2021, 7:45pm:
+
+Some additional analyses and plots:
+1: First: compare site-based pools as well: what are we missing here?  Are there differences in pools once concentration is corrected for with bulk density?
+(per Josh email)
+"Only then after extracting what you can from those perspectives—that the biggest differences in soil characters are between features, and then that the big differences between treatments are in the proportioning of landscape features. When you combine all that to get plot-scale perspectives, combining both between-feature differences and between-treatment differences in features, you see a somewhat different perspective."
+-- DONE as of weekend of Aug. 14th/15th: all adjusted with holm-bonferroni correction (see chunk immediately below this one)
+SOIL C
+- no interaction between feature and treatment
+- significant effects of feature, not treatment (anova of model)
+
+SOIL N
+- no interaction between treatment and feature
+- significant effects of treatment AND feature
+
+MBC
+- no interaction between treatment and feature
+- NO effect of treatment; significant effect of feature
+
+MBN
+- no interaction between treatment and feature
+- NO effect of treatment; significant effect of feature
+
+2: For each treatment, plot same barplots as above with relative distribution of features across treatments (per Josh email) (DONE Aug. 16th (see above, and plot in the proportions markdown)
+
+4: sensitivity analysis: how much MORE would I need to have sampled (or how many more plots) to get a significant difference, if one exists? How biologically big would the effects have to be in order to detect it with n = 3 plus the variation I'm seeing? How much more structural change would I need to see on the treatment level to detect an effect?  OR, how much more within-feature difference would I need to see to detect a difference on the treatment level with this current amount of structural difference? (per Hillary email) (DONE Aug. 16th, see chunk 3 down from here i.e. last chunk in this markdown)
+
+######################################
+1: site-based pools across feature and treatment. all models have been model-tested.
+```{r site_pools}
+# model of site-based pools comparison:
+lmm_soilC_site <- lmerTest::lmer(log(pool_kg_m2) ~ treatment + feature + (1|repl), data = soilC_long)
+simulateResiduals(lmm_soilC_site, plot = TRUE)
+anova(lmm_soilC_site) # significant effect of feature and NOT treatment for impact of sample location on soil DOC
+
+# make table of model results: holm-bonferroni post-hoc test
+library(sjPlot)
+tab_model(lmm_soilC_site, p.adjust = "holm",
+          pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                          "under canopy", "termite mound"))
+
+emmeans(lmm_soilC_site, specs = pairwise ~ feature, type = "response")
+
+##################
+lmm_soilN_site <- lmerTest::lmer(log(pool_kg_m2) ~ treatment + feature + (1|repl), 
+                                 data = soilN_long)
+simulateResiduals(lmm_soilN_site, plot = TRUE)
+anova(lmm_soilN_site) # significant effect of feature and treatment for soil DON
+
+# table of model results: holm-bonferroni post-hoc test
+tab_model(lmm_soilN_site, p.adjust = "holm",
+          pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                          "under canopy", "termite mound"))
+emmeans(lmm_soilN_site, specs = pairwise ~ feature, type = "response")
+emmeans(lmm_soilN_site, specs = pairwise ~ treatment, type = "response")
+
+##################
+lmm_micC_site <- lmerTest::lmer(log(pool_kg_m2) ~ treatment + feature + (1|repl), 
+                                 data = micC_long)
+simulateResiduals(lmm_soilN_site, plot = TRUE)
+anova(lmm_micC_site) # significant effect of feature for soil DON
+
+# table of model results: holm-bonferroni post-hoc test
+tab_model(lmm_micC_site, p.adjust = "holm",
+          pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                          "under canopy", "termite mound"))
+emmeans(lmm_micC_site, specs = pairwise ~ feature, type = "response")
+
+##################
+lmm_micN_site <- lmerTest::lmer(log(pool_kg_m2) ~ treatment + feature + (1|repl), 
+                                 data = micN_long)
+simulateResiduals(lmm_micN_site, plot = TRUE)
+anova(lmm_micN_site) # significant effect of feature for soil DON
+
+# table of model results: holm-bonferroni post-hoc test
+tab_model(lmm_micN_site, p.adjust = "holm",
+          pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                          "under canopy", "termite mound"))
+emmeans(lmm_micN_site, specs = pairwise ~ feature, type = "response")
+```
+
+#############################
+2: plot-level pools across treatment, for each feature. all models have been model-tested. (11:45pm, Mon. Aug. 16th)
+```{r plot_feature_pools}
+# soil C first:
+
+soilC_OS <- soilC_long %>% 
+  filter(feature == "OS")
+soilC_UT <- soilC_long %>% 
+  filter(feature == "UT")
+soilC_OM <- soilC_long %>% 
+  filter(feature == "OM")
+
+# OS
+lmm_soilC_OS_plot <- lmerTest::lmer(log(pool_kg_ha) ~ treatment + (1|repl), data = soilC_OS) # had to log-transform
+simulateResiduals(lmm_soilC_OS_plot, plot = TRUE)
+anova(lmm_soilC_OS_plot) # significant effect of treatment on total plot-level OS soil C
+
+e <- emmeans(lmm_soilC_OS_plot, specs = pairwise ~ treatment, type = "response", adjust = "tukey") # modeled ratios of pairwise comparisons
+e$contrasts # sig. diffs between: MWC, C
+
+# UT
+lmm_soilC_UT_plot <- lmerTest::lmer(pool_kg_ha ~ treatment + (1|repl), data = soilC_UT)
+simulateResiduals(lmm_soilC_OS_plot, plot = TRUE)
+anova(lmm_soilC_UT_plot) # significant effect of treatment on total plot-level UT soil C
+
+e <- emmeans(lmm_soilC_UT_plot, specs = pairwise ~ treatment, type = "response", adjust = "tukey") # modeled ratios of pairwise comparisons
+e$contrasts # sig. diffs between: MWC, O
+
+# OM
+lmm_soilC_OM_plot <- lmerTest::lmer(log(pool_kg_ha) ~ treatment + (1|repl), data = soilC_OM) # had to log-transform
+simulateResiduals(lmm_soilC_OM_plot, plot = TRUE)
+anova(lmm_soilC_OM_plot) # no significant effect of treatment on plot-level OM soil C
+
+# plot:
+ggbarplot(soilC_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "total soil TOC pool, kg/ha", facet.by = "feature")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "interspace", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette) + 
+  theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+```
+
+```{r}
+##################
+# soil N:
+
+soilN_OS <- soilN_long %>% 
+  filter(feature == "OS")
+soilN_UT <- soilN_long %>% 
+  filter(feature == "UT")
+soilN_OM <- soilN_long %>% 
+  filter(feature == "OM")
+
+# OS
+lmm_soilN_OS_plot <- lmerTest::lmer(log(pool_kg_ha) ~ treatment + (1|repl), data = soilN_OS) # had to log-transform
+simulateResiduals(lmm_soilN_OS_plot, plot = TRUE)
+anova(lmm_soilN_OS_plot) # no effect of treatment on total plot-level OS soil N
+
+# UT
+lmm_soilN_UT_plot <- lmerTest::lmer(pool_kg_ha ~ treatment + (1|repl), data = soilN_UT)
+simulateResiduals(lmm_soilN_UT_plot, plot = TRUE)
+anova(lmm_soilN_UT_plot) # significant effect of treatment on total plot-level UT soil N
+
+e <- emmeans(lmm_soilN_UT_plot, specs = pairwise ~ treatment, type = "response", adjust = "tukey") # modeled ratios of pairwise comparisons
+e$contrasts # sig. diffs between: MWC -- C, MWC -- O, MW -- C
+
+# OM
+lmm_soilN_OM_plot <- lmerTest::lmer(log(pool_kg_ha) ~ treatment + (1|repl), data = soilN_OM) # had to log-transform
+simulateResiduals(lmm_soilN_OM_plot, plot = TRUE)
+anova(lmm_soilN_OM_plot) # no effect of treatment on total plot-level OM soil N
+
+# plot:
+ggbarplot(soilN_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "total soil TEN pool, kg/ha", facet.by = "feature")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "interspace", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette) + 
+  theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+```
+
+
+```{r}
+##################
+# MBC:
+
+micC_OS <- micC_long %>% 
+  filter(feature == "OS")
+micC_UT <- micC_long %>% 
+  filter(feature == "UT")
+micC_OM <- micC_long %>% 
+  filter(feature == "OM")
+
+# OS
+lmm_micC_OS_plot <- lmerTest::lmer(pool_kg_ha ~ treatment + (1|repl), data = micC_OS)
+simulateResiduals(lmm_micC_OS_plot, plot = TRUE)
+anova(lmm_micC_OS_plot) # significant effect of treatment on total plot-level OS soil N
+
+e <- emmeans(lmm_micC_OS_plot, specs = pairwise ~ treatment, type = "response", adjust = "tukey") # modeled ratios of pairwise comparisons
+e$contrasts # sig. diffs between: MWC--0
+
+# UT
+lmm_micC_UT_plot <- lmerTest::lmer(log(pool_kg_ha) ~ treatment + (1|repl), data = micC_UT) # had to log-transform
+simulateResiduals(lmm_micC_UT_plot, plot = TRUE)
+anova(lmm_micC_UT_plot) # significant effect of treatment on total plot-level UT soil N
+
+e <- emmeans(lmm_micC_UT_plot, specs = pairwise ~ treatment, type = "response", adjust = "tukey") # modeled ratios of pairwise comparisons
+e$contrasts # sig. diffs between: MWC--MW, MWC--C, MWC--O, MW--C, MW--O
+
+# OM
+lmm_micC_OM_plot <- lmerTest::lmer(pool_kg_ha ~ treatment + (1|repl), data = micC_OM)
+simulateResiduals(lmm_micC_OM_plot, plot = TRUE)
+anova(lmm_micC_OM_plot) # no effect of treatment on total plot-level OM microbial biomass carbon
+
+# plot:
+ggbarplot(micC_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "total soil MBC pool, kg/ha", facet.by = "feature")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette) + 
+  theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+```
+
+```{r}
+##################
+# MBN
+
+micN_OS <- micN_long %>% 
+  filter(feature == "OS")
+micN_UT <- micN_long %>% 
+  filter(feature == "UT")
+micN_OM <- micN_long %>% 
+  filter(feature == "OM")
+
+# OS
+lmm_micN_OS_plot <- lmerTest::lmer(pool_kg_ha ~ treatment + (1|repl), data = micN_OS)
+simulateResiduals(lmm_micN_OS_plot, plot = TRUE)
+anova(lmm_micN_OS_plot) # no effect of treatment on total plot-level OS soil N
+
+# UT
+lmm_micN_UT_plot <- lmerTest::lmer(log(pool_kg_ha) ~ treatment + (1|repl), data = micN_UT) # had to log-transform
+simulateResiduals(lmm_micN_UT_plot, plot = TRUE)
+anova(lmm_micN_UT_plot) # significant effect of treatment on total plot-level UT soil N
+
+e <- emmeans(lmm_micN_UT_plot, specs = pairwise ~ treatment, type = "response", adjust = "tukey") # modeled ratios of pairwise comparisons
+e$contrasts # sig. diffs between: MWC--C, MWC--O, MW--C
+
+# OM
+lmm_micN_OM_plot <- lmerTest::lmer(pool_kg_ha ~ treatment + (1|repl), data = micN_OM)
+simulateResiduals(lmm_micN_OM_plot, plot = TRUE)
+anova(lmm_micN_OM_plot) # no effect of treatment on total plot-level OM microbial biomass carbon
+
+# plot:
+ggbarplot(micN_long, x = "treatment", y = "pool_kg_ha", add = c("mean_se"), fill = "feature", 
+          xlab = FALSE, ylab = "total soil MBN pool, kg/ha", facet.by = "feature")+
+  scale_fill_manual("",  
+                      labels = c("OS" = "open soil", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette) + 
+  theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
+```
+
+
+Power analysis of the linear models for plot-scale pools comparison: https://lkumle.github.io/power_notebooks/Scenario1_notebook.html also Kumle, Vo, and Draschkow 2021 "Estimating power in (generalized) linear mixed models: An open introduction and tutorial in R".
+```{r power_analysis_soilC}
+# below is for soil DOC:
+
+##### mixedpower package
+library(mixedpower)
+
+### Information about model used for simulation ###
+# we want to explore power for different sample sizes, which corresponds to one of our random variables (i.e. replicate of the KLEE)
+model <- lmm_soilC  # which model do we want to simulate power for?
+data_C <- soilC_sum # data used to fit the model
+
+# create dummy numeric variable for simvar and fixed_effects:
+data_C$repl_num <- c(2,1,3,2,1,3,2,1,3,2,1,3)
+data_C[["repl_num"]] <- as.numeric(as.factor(data_C[["repl_num"]]))
+data_C$treatment_num <- c(4,4,4,3,3,3,2,2,2,1,1,1) # 4 = MWC, 3 = MW, 2 = C, 1 = O
+data_C[["treatment_num"]] <- as.numeric(as.factor(data_C[["treatment_num"]]))
+
+fixed_effects <- "treatment_num"  # all fixed effects specified in FLPmodel
+simvar <- "repl_num" # which random effect do we want to vary (in tmer os n) in the simulation?
+
+### simulation parameters ###
+steps <- c(3,6,9,12,15,18, 21, 24) # which sample sizes do we want to look at? existing sample size = 3.
+critical_value <- 2 # which t/z value do we want to use to test for significance? 1.96 is cutoff absolute t value for significance of alpha = 0.05
+n_sim <- 1000 # how many single simulations should be used to estimate power?
+
+## run simulation (warning could take awhile) ### SOIL DOC
+power_FLP <- mixedpower(model = lmm_soilC, data = data_C,
+                        fixed_effects = "treatment_num",
+                        simvar = "repl_num", 
+                        steps = c(3,6,9,12,15,18, 21, 24),
+                        critical_value = 2, 
+                        n_sim = 1000)
+power_FLP # examine output
+multiplotPower(power_FLP, ppi = 300, filename = "poweranalysis_DOC.png") # plot (and save in working directory) output
+
+############
+### SOIL DOC
+############
+
+data_N <- soilN_sum # data used to fit the model
+
+# create dummy numeric variable for simvar and fixed_effects:
+data_N$repl_num <- c(2,1,3,2,1,3,2,1,3,2,1,3) # 2 = C, 1 = N, 3 = S
+data_N[["repl_num"]] <- as.numeric(as.factor(data_N[["repl_num"]]))
+data_N$treatment_num <- c(4,4,4,3,3,3,2,2,2,1,1,1) # 4 = MWC, 3 = MW, 2 = C, 1 = O
+data_N[["treatment_num"]] <- as.numeric(as.factor(data_N[["treatment_num"]]))
+
+## run simulation (warning could take awhile) 
+power_FLP_2 <- mixedpower(model = lmm_soilN, data = data_N,
+                          fixed_effects = "treatment_num",
+                          simvar = "repl_num",
+                          steps = c(3,6,9,12,15,18,21,24),
+                          critical_value = 2,
+                          n_sim = 1000)
+power_FLP_2
+multiplotPower(power_FLP_2, ppi = 300, filename = "poweranalysis_DON.png") # plot (and save in working directory) output
+
+############
+### MBC
+############
+
+data_mbc <- micC_sum # data used to fit the model
+
+# create dummy numeric variable for simvar and fixed_effects:
+data_mbc$repl_num <- c(2,1,3,2,1,3,2,1,3,2,1,3) # 2 = C, 1 = N, 3 = S
+data_mbc[["repl_num"]] <- as.numeric(as.factor(data_mbc[["repl_num"]]))
+data_mbc$treatment_num <- c(4,4,4,3,3,3,2,2,2,1,1,1) # 4 = MWC, 3 = MW, 2 = C, 1 = O
+data_mbc[["treatment_num"]] <- as.numeric(as.factor(data_mbc[["treatment_num"]]))
+
+## run simulation (warning could take awhile) 
+power_FLP_3 <- mixedpower(model = lmm_micC, data = data_mbc,
+                          fixed_effects = "treatment_num",
+                          simvar = "repl_num",
+                          steps = c(3,6,9,12,15,18,21,24),
+                          critical_value = 2,
+                          n_sim = 1000)
+power_FLP_3
+multiplotPower(power_FLP_3, ppi = 300, filename = "poweranalysis_MBC.png") # plot (and save in working directory) output
+
+############
+### MBN
+############
+
+data_mbn <- micN_sum # data used to fit the model
+
+# create dummy numeric variable for simvar and fixed_effects:
+data_mbn$repl_num <- c(2,1,3,2,1,3,2,1,3,2,1,3) # 2 = C, 1 = N, 3 = S
+data_mbn[["repl_num"]] <- as.numeric(as.factor(data_mbn[["repl_num"]]))
+data_mbn$treatment_num <- c(4,4,4,3,3,3,2,2,2,1,1,1) # 4 = MWC, 3 = MW, 2 = C, 1 = O
+data_mbn[["treatment_num"]] <- as.numeric(as.factor(data_mbn[["treatment_num"]]))
+
+## run simulation (warning could take awhile) 
+power_FLP_4 <- mixedpower(model = lmm_micC, data = data_mbn,
+                          fixed_effects = "treatment_num",
+                          simvar = "repl_num",
+                          steps = c(3,6,9,12,15,18,21,24),
+                          critical_value = 2,
+                          n_sim = 1000)
+power_FLP_4
+multiplotPower(power_FLP_4, ppi = 300, filename = "poweranalysis_MBN.png") # plot (and save in working directory) output
+```
+
+
+
+
+
+
+
+
+
+Quick summary of site-specific pools and total plot pools, all four variables:
+```{r}
+library(rstatix)
+# SOIL DOC
+# sampling-site specific pools grouped by treatment and feature, mean and SE: using mg/cm2
+soilC_long %>% group_by(feature, treatment) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+soilC_long %>% group_by(feature) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+soilC_long %>% group_by(feature) %>% get_summary_stats(pool_kg_m2, type = "mean_se")
+
+# plot-scale pools grouped by treatment, mean and SE:
+soilC_sum %>% group_by(treatment) %>% get_summary_stats(sum_kgha_C, type = "mean_se")
+soilC_long %>% group_by(feature) %>% get_summary_stats(pool_kg_ha, type = "mean_se")
+soilC_long %>% 
+  filter(feature == "UT") %>% 
+  group_by(treatment) %>% get_summary_stats(pool_kg_ha, type = "mean_se")
+
+# SOIL DON
+# sampling-site specific pools grouped by treatment and feature, mean and SE: using mg/cm2
+soilN_long %>% group_by(feature, treatment) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+soilN_long %>% group_by(feature) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+soilN_long %>% group_by(treatment) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+
+# SOIL MBC
+# sampling-site specific pools grouped by treatment and feature, mean and SE: using mg/cm2
+micC_long %>% group_by(feature, treatment) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+micC_long %>% group_by(feature) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+
+# SOIL MBN
+# sampling-site specific pools grouped by treatment and feature, mean and SE: using mg/cm2
+micN_long %>% group_by(feature, treatment) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+micN_long %>% group_by(feature) %>% get_summary_stats(pool_mg_cm2, type = "mean_se")
+
+########
+# plot-scale pools grouped by treatment, mean and SE:
+soilC_long %>% 
+   filter(feature == "OS") %>% 
+   group_by(treatment) %>% get_summary_stats(pool_kg_ha, type = "mean_se")
+
+soilN_long %>% 
+   filter(feature == "UT") %>% 
+   group_by(treatment) %>% get_summary_stats(pool_kg_ha, type = "mean_se")
+
+micC_long %>% 
+   filter(feature == "UT") %>% 
+   group_by(treatment) %>% get_summary_stats(pool_kg_ha, type = "mean_se")
+
+micN_long %>% 
+   filter(feature == "UT") %>% 
+   group_by(treatment) %>% get_summary_stats(pool_kg_ha, type = "mean_se")
+
+########
+# plot-scale total pools
+soilC_sum %>% 
+  group_by(treatment) %>% get_summary_stats(sum_kgha_C, type = "mean_se")
+
+soilN_sum %>% 
+  group_by(treatment) %>% get_summary_stats(sum_kgha_N, type = "mean_se")
+
+micC_sum %>% 
+  group_by(treatment) %>% get_summary_stats(sum_kgha_micC, type = "mean_se")
+
+micN_sum %>% 
+  group_by(treatment) %>% get_summary_stats(sum_kgha_micN, type = "mean_se")
+```
+
+

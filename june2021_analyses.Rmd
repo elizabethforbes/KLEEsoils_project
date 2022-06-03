@@ -1,5 +1,5 @@
 ---
-title: "june2021_analyses"
+title: "June2021_analyses"
 author: "Elizabeth Forbes"
 date: "5/25/2021"
 output: html_document
@@ -9,265 +9,781 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-This doc is for data exploration/analyses related to jar incubations. Data are imported/cleaned in the other RMD doc in this project ("allyrs_concat_jarincs.Rmd"). Inc_b is all the data; inc16-18 are just those years' of data.
+## R Markdown
 
-The chunk is to analyze the incubation data for possible treatment effects: does treatment have an effect at all, within certain soil types, or is the main driver of effect soil type?
+The files are imported/cleaned/created in the other doc ("TOC_2017incs_ForbesMoore.rmd") in this folder.  Here is data exploration and analyses based on feedback from a May 2021 committee meeting.
+
+The chunk is to analyze the TOC data for possible treatment effects: does treatment have an effect at all, within certain soil types, or is the main driver of effect soil type?
 - I would expect treatment to have some effect because increased carbon inputs into the soil from litter that isn't eaten by herbivores (e.g. O > MW, O > C)
-- so look at ANOVAs of each soil type against treatment for total accumulation (hr == 144) and repeated measures (aka rate of increase).
-```{r treatmenteffects_totacc}
+- so let's look at ANOVAs of each soil type against treatment for NPOC, TN, and flushes.
+
+one-way ANOVAs to detect treatment effects on soil DOC:
+```{r treatmenteffects_NPOCnonfume}
 library(tidyverse)
-library(ggplot2)
-library(ggpubr)
 library(rstatix) #package for tidy stats
 
-# one-way ANOVA of open soil samples, total C accumulation:
-inc_b %>% 
-  filter(hrs_incubated == 144) %>%
-  filter(soiltype == "OS") %>% 
-  anova_test(ugC_gsoil ~ treatment) # significant effect of treatment on OS soils, p = 0.008
-# one-way ANOVA of open soil samples, total C accumulation, just 2018:
-# removed code but same as above, just added 'year_col' filter; significant effect of treatment in 2018, not 2015 or 2016. See notes from convo with Ana and Devyn about that. 
+# one-way ANOVA of open soil samples, DOC:
+toc %>% 
+  filter(feature == "OS") %>% 
+  anova_test(NPOC_nonfume ~ trtmnt) # no difference in one-way anova for OS soils
+#   Effect DFn DFd     F     p p<.05   ges
+# 1 trtmnt   3 116 0.556 0.645       0.014
 
-# one-way ANOVA of under tree samples, total C accumulation:
-inc_b %>% 
-  filter(hrs_incubated == 144) %>%
-  filter(soiltype == "UT") %>% 
-  anova_test(ugC_gsoil ~ treatment) # NO significant treatment effect for UT soils, p = 0.34
+# one-way ANOVA of under tree samples, DOC:
+toc %>% 
+  filter(feature == "UT") %>% 
+  anova_test(NPOC_nonfume ~ trtmnt) # no difference in one-way anova for UT soils
 
-# one-way ANOVA of termite mound samples, total C accumulation:
-inc_b %>% 
-  filter(hrs_incubated == 144) %>%
-  filter(soiltype == "OM") %>% 
-  anova_test(ugC_gsoil ~ treatment) # significant effect of treatment on OM soils, p = 0.014
-
-# conclusion: there is a significant impact of treatment on soil type results, but perhaps only in 2018. 
+# one-way ANOVA of on mound samples, DOC:
+toc %>% 
+  filter(feature == "OM") %>% 
+  anova_test(NPOC_nonfume ~ trtmnt) # no difference in one-way anova for OM soils
 ```
 
-So how does landscape feature influence [carbon metric], and does grazing treatment influence the relative size of this effect? (https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html)
-Proposed format:
-glmm(C ~ treatment * feature + year + 1|random)
-- random effects: treatment nested within block 
-- adding year as fixed effect but assuming that year (proxy for drought status) does not interact with treatment/feature on the fundamental level (e.g. carbon) over such a short period
+one-way ANOVAs to detect treatment effects on microbial biomass C:
+```{r treatmenteffects_NPOC_flush}
+# one-way ANOVA of open soil samples, microbial C:
+toc %>% 
+  filter(feature == "OS") %>% 
+  anova_test(NPOC_flush ~ trtmnt) # no difference in one-way anova for OS soils
+#   Effect DFn DFd     F     p p<.05   ges
+# 1 trtmnt   3 116 0.556 0.645       0.014
 
+# one-way ANOVA of under tree samples, microbial C:
+toc %>% 
+  filter(feature == "UT") %>% 
+  anova_test(NPOC_flush ~ trtmnt) # no difference in one-way anova for UT soils, p <0.09 tho
 
-```{r setup}
-# model of total accumulation, with interaction between treatment and soil type plus fixed effect of year, and a random effect of treatment nested within location (block):
-# using both fixed and random effects, e.g. using GLMMs (generalized linear mixed models)
-inc_acc <- inc_b %>% 
-  filter(hrs_incubated == 144)
-summary(inc_acc)
-# make year_col a factor:
-inc_acc$year_col <- as.factor(inc_acc$year_col)
+# one-way ANOVA of on mound samples, microbial C:
+toc %>% 
+  filter(feature == "OM") %>% 
+  anova_test(NPOC_flush ~ trtmnt) # no difference in one-way anova for OM soils
+```
+one-way ANOVAs to detect treatment effects on soil DON:
+```{r treatmenteffects_TN_nonfume}
+# one-way ANOVA of open soil samples, soil DON:
+toc %>% 
+  filter(feature == "OS") %>% 
+  anova_test(TN_nonfume ~ trtmnt) # no difference in one-way anova for OS soils
+#   Effect DFn DFd     F     p p<.05   ges
+# 1 trtmnt   3 116 0.556 0.645       0.014
 
-# add a rate column: divide "ugC_gsoil" by six (total days) (per notes from Josh, July 31 2021)
-inc_acc$ugC_gsoil_day <- (inc_acc$ugC_gsoil)/6
+# one-way ANOVA of under tree samples, soil DON:
+toc %>% 
+  filter(feature == "UT") %>% 
+  anova_test(TN_nonfume ~ trtmnt) # no difference in one-way anova for UT soils, p <0.09 tho
 
-# remove NAs:
-inc_acc <- inc_acc[complete.cases(inc_acc[ ,12]),] 
-
-# histogram of rate data:
-hist(inc_acc$ugC_gsoil_day) # no major outliers, vaguely gamma-distributed
-
+# one-way ANOVA of on mound samples, soil DON:
+toc %>% 
+  filter(feature == "OM") %>% 
+  anova_test(TN_nonfume ~ trtmnt) # no difference in one-way anova for OM soils
 ```
 
-Model testing:
-```{r analyses}
-lm <- lm(ugC_gsoil_day ~ treatment*soiltype*year_col, data=inc_acc)
-anova(lm) # no interaction between treatment and soiltype, but definitely an effect of both fixed
+one-way ANOVAs to detect treatment effects on soil microbial N:
+```{r treatmenteffects_TN_nonfume}
+# one-way ANOVA of open soil samples, soil DON:
+toc %>% 
+  filter(feature == "OS") %>% 
+  anova_test(TN_flush ~ trtmnt) # no difference in one-way anova for OS soils
+#   Effect DFn DFd     F     p p<.05   ges
+# 1 trtmnt   3 116 0.556 0.645       0.014
 
-lm1 <- lm(ugC_gsoil_day ~ treatment*year_col + soiltype*year_col , data=inc_acc)
-anova(lm1)
-hist(resid(lm1)) # not horribly abnormal, but also do want to incorporate the block as a random effect.
-# library(DHARMa)
-simulateResiduals(lm1, plot = TRUE) # some abnormality in distribution of residuals
+# one-way ANOVA of under tree samples, soil DON:
+toc %>% 
+  filter(feature == "UT") %>% 
+  anova_test(TN_flush ~ trtmnt) # no difference in one-way anova for UT soils, p <0.09 tho
 
+# one-way ANOVA of on mound samples, soil DON:
+toc %>% 
+  filter(feature == "OM") %>% 
+  anova_test(TN_flush ~ trtmnt) # no difference in one-way anova for OM soils
+```
+
+Conclusion: there does not appear to be hints of effect of treatment on soil DOC, DON, microbial biomass C, or microbial biomass N.
+
+Look at distribution of the data, one variable at a time. First, NPOC soil (DOC):
+```{r}
+library(fitdistrplus)
+
+# remove na's for each of the four cols of interest:
+NPOCsoil_naomit <- na.omit(toc$NPOC_nonfume)
+NPOCflush_naomit <- na.omit(toc$NPOC_flush)
+TNsoil_naomit <- na.omit(toc$TN_nonfume)
+TNflush_naomit <- na.omit(toc$TN_flush)
+
+# Cullen and Frey plot, NPOC soil, plus bootstrapping:
+descdist(NPOCsoil_naomit, boot=500, discrete = FALSE)
+# kurtosis (pointiness) and skew are plotted as blue point ("observation"); possible gamma, beta, weibull distributions
+
+# plot these distributions on the data to see what fits:
+fw <- fitdist(NPOCsoil_naomit, "weibull")
+fg <- fitdist(NPOCsoil_naomit, "gamma")
+par(mfrow = c(2, 2))
+plot.legend <- c("Weibull", "gamma")
+denscomp(list(fw, fg), legendtext = plot.legend)
+qqcomp(list(fw, fg), legendtext = plot.legend)
+cdfcomp(list(fw, fg), legendtext = plot.legend)
+ppcomp(list(fw, fg), legendtext = plot.legend)
+
+# most likely seeing gamma distributed data for soil DOC
+
+# larger plot, just those two to determine best fit:
+denscomp(list(fw, fg), legendtext = c("weibull", "gamma"))
+# honestly looks like Weibull is a better fit!  weird.
+
+# and some descriptive statistics, including AIC:
+gofstat(list(fw, fg))
+# GAMMA is ever-so-slightly a better fit according to AIC, BIC, and goodness-of-fit stats.
+```
+... and determining data distribution for NPOC flush aka microbial biomass carbon:
+```{r}
+# Cullen and Frey plot, NPOC flush (plus bootstrapping):
+descdist(as.numeric(NPOCflush_naomit), boot=500, discrete = FALSE)
+# possible lognormal distribution, gamma distribution, exponential distribution
+
+# plot these distributions on the data to see what fits:
+fl <- fitdist(as.numeric(NPOCflush_naomit), "lnorm")
+fg <- fitdist(as.numeric(NPOCflush_naomit), "gamma")
+fe <- fitdist(as.numeric(NPOCflush_naomit), "exp")
+par(mfrow = c(2, 2))
+plot.legend <- c("lognormal", "gamma", "exponential")
+denscomp(list(fl, fg, fe), legendtext = plot.legend)
+qqcomp(list(fl, fg, fe), legendtext = plot.legend)
+cdfcomp(list(fl, fg, fe), legendtext = plot.legend)
+ppcomp(list(fl, fg, fe), legendtext = plot.legend)
+
+# based on these plots, could be either lognormal or gamma, but I'm leaning gamma.
+
+# larger plot, just those two to determine best fit:
+denscomp(list(fl, fg), legendtext = c("lognormal", "gamma"))
+# honestly looks like lognormal is a biiiit better of a fit but sort of a toss-up
+
+# and some descriptive statistics, including AIC:
+gofstat(list(fl, fg))
+# GAMMA is ever-so-slightly a better fit according to AIC, BIC (tho the goodness-of-fit stats somehwat indicate lognormal...(are lower than gamma's)
+```
+
+... and determining data distribution for soil TN aka DON:
+```{r}
+# Cullen and Frey plot, TN soil (plus bootstrapping):
+descdist(TNsoil_naomit, boot=500, discrete = FALSE)
+# possible gamma distribution, weibull distribution
+
+# plot these distributions on the data to see what fits:
+fw <- fitdist(TNsoil_naomit, "weibull")
+fg <- fitdist(TNsoil_naomit, "gamma")
+fe <- fitdist(TNsoil_naomit, "exp")
+par(mfrow = c(2, 2))
+plot.legend <- c("weibull", "gamma", "exponential")
+denscomp(list(fw, fg, fe), legendtext = plot.legend)
+qqcomp(list(fw, fg, fe), legendtext = plot.legend)
+cdfcomp(list(fw, fg, fe), legendtext = plot.legend)
+ppcomp(list(fw, fg, fe), legendtext = plot.legend)
+
+# based on these plots I'm leaning gamma. Eliminating exponential but wil compare with Weibull.
+
+# larger plot, just those two to determine best fit:
+denscomp(list(fw, fg), legendtext = c("weibull", "gamma"))
+# looks to me like gamma is a better fit distribution; confirm with desc. stats:
+
+gofstat(list(fw, fg))
+# GAMMA is ever-so-slightly a better fit according to AIC, BIC, and goodness-of-fit stats
+```
+
+... lastly, determining data distribution for TN flush aka microbial biomass nitrogen:
+```{r}
+# Cullen and Frey plot, TN flush (plus bootstrapping):
+descdist(as.numeric(TNflush_naomit), boot=500, discrete = FALSE)
+# possible gamma distribution, weibull distribution
+
+# plot these distributions on the data to see what fits:
+fw <- fitdist(as.numeric(TNflush_naomit), "weibull")
+fg <- fitdist(as.numeric(TNflush_naomit), "gamma")
+fe <- fitdist(as.numeric(TNflush_naomit), "exp")
+par(mfrow = c(2, 2))
+plot.legend <- c("weibull", "gamma", "exponential")
+denscomp(list(fw, fg, fe), legendtext = plot.legend)
+qqcomp(list(fw, fg, fe), legendtext = plot.legend)
+cdfcomp(list(fw, fg, fe), legendtext = plot.legend)
+ppcomp(list(fw, fg, fe), legendtext = plot.legend)
+
+# based on these plots I'm leaning gamma, again.  Will test against Weibull.
+
+# larger plot, just those two to determine best fit:
+denscomp(list(fw, fg), legendtext = c("weibull", "gamma"))
+# looks to me like gamma is a better fit distribution; confirm with desc. stats:
+
+gofstat(list(fw, fg))
+# GAMMA is ever-so-slightly a better fit according to AIC, BIC, and goodness-of-fit stats
+```
+Okay the above indicates that the response variables are all gamma-distributed.  Before assuming anything tho use an LMM and examine the residuals for normality, and other model validation steps (normality, homogeneity, fixed X, indepdence, and model specs).
+
+```{r histogram}
+# remove the 'fume' data from this dataframe for visualization:
+toc_fourvar <- toc[,-c(5,7)]
+# use forecats to reorder data:
+toc_fourvar <- toc_fourvar %>% 
+  mutate(feature=fct_relevel(feature, "OS", "UT", "OM")) %>% 
+  mutate(trtmnt=fct_relevel(trtmnt, "MWC", "MW", "C", "O"))
+
+library(reshape2)
+# melt data to long form for histograms:
+toc_long <- melt(data = toc_fourvar,
+                 id.vars = c("repl","trtmnt","feature","ID"),
+                 variable.name = "soil_variable",
+                 value.name = "ugC_gsoil")
+
+# histogram of each X value for toc data, all four categories (plus two more bc )
+library(hrbrthemes)
+toc_long %>% 
+  ggplot(aes(x=ugC_gsoil, fill=soil_variable))+
+  geom_histogram(alpha=0.6, position = 'identity')+
+  theme_ipsum()+
+  labs(fill="")+
+  facet_wrap(~soil_variable)+
+  theme(legend.position = "none")
+
+# looks like normal distribution of microbial C, and gamma distributions of the other three.
+```
+
+```{r linearmodel_testing_soilDOC}
+# LMMs: https://www.r-bloggers.com/2017/12/linear-mixed-effect-models-in-r/
+# library(nlme)
 # library(lme4)
-# library(lmerTest)
-# library(emmeans)
-lmm_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment*year_col + soiltype*year_col + (1|replicate), data = inc_acc)
-anova(lmm_rate)
-summary(lmm_rate)
+### full LINEAR model to examine residuals, soil DOC:
+LM_DOC <- lm(NPOC_nonfume ~ trtmnt*feature, data = toc_fourvar)
+summary(LM_DOC)
+plot(LM_DOC) # possible outlier based on cook's distance?
+cooks <- cooks.distance(LM_DOC)
+n <- nrow(toc_fourvar)
 
-hist(resid(lmm_rate)) # honestly the residuals don't look too bad.
+# plot outliers: not sure what to do about these yet, will consider
+{plot(cooks, pch="*", cex=2, main = "influential observations by cook's distance")
+abline(h=4/n, col="red")}
 
-simulateResiduals(lmm_rate, plot = TRUE) # well apparently they do, booooooo
+# build ou the GLM as a benchmark for comparison with LMMs (same as LM but comparable):
+# library(nlme)
+GLM_DOC <- gls(NPOC_nonfume ~ trtmnt*feature, data = toc_fourvar, method = "ML")
+summary(GLM_DOC)
 
-####################
-# log-transformation:
-lmm1_rate <- lmerTest::lmer(log(ugC_gsoil_day) ~ treatment*soiltype + 
-                              treatment*year_col + 
-                              soiltype*year_col +
-                              (1|replicate), data=inc_acc)
-# library(multcomp)
-anova(lmm1_rate) # all three fixed effects (treatment, soil type, and year) are significant; interaction between treatment and year is signficant, as is interaction between soiltype and year
+# LMMs with fixed effects/random effects:
+library(lme4)
+lmm1 <- lmer(NPOC_nonfume ~ trtmnt*feature + (1 | repl), toc_fourvar)
+summary(lmm1) # non-significant interaction between any treatment:feature; drop from model
+lmm2 <- lmer(NPOC_nonfume ~ trtmnt+feature + (1|repl), data = toc_fourvar)
+summary(lmm2) # O (treatment) is different from MWC; UT and OM different from OS (feature)
+lmm3 <- lmer(NPOC_nonfume ~ feature + (1|repl), data = toc_fourvar) # drop treatment entirely just to investigate most parsimonious option
+summary(lmm3)
 
-summary(lmm1_rate, test = adjusted("holm")) # use holm-bonferroni correction for multiple testing
-hist(resid(lmm1_rate)) # cautiously optimistic
-qqnorm(resid(lmm1_rate)) # hey this looks okay!
-simulateResiduals(lmm1_rate, plot = TRUE) # huh; better, but not quite there.
-plotResiduals(lmm1_rate, form = inc_acc$soiltype) # looks like there is some non-homogeneity of variance within the OM group of data, but across treatments it's okay.  Gonna just be alright with that; when I analyze by year it might be interesting.
-anova(lmm1_rate)
+# ANOVA for likelihood-ratio-test between models
+anova(lmm2, lmm3) # LMM3 has lower AIC, BIC, and logLik values (p-val is significant in model comparison); but, given we know there might be a treatment effect and that the treatment is literally built into how the KLEE works, go with lmm2 (e.g. including treatment as fixed effect but not with an interaction)
 
-inc_acc %>% 
-  group_by(year_col) %>% 
-  get_summary_stats(ugC_gsoil_day, type = "mean_se")
+# look at residuals of lmm2:
+# QQ plots:
+qqnorm(resid(lmm2, type = "pearson")) #woof!  we aren't remotely close to normal.  The outliers? 
+hist(resid(lmm2)) # yeah very right-skewed residuals here
+plot(lmm2) # also possibly *some* heteroskedasticity (residuals against fitted vals)
 
-# what was the effect of drought for pairwise comparisons?
-emmeans(lmm1_rate, specs = pairwise ~ "year_col", type = "response")
+# looks like we'll need to do GLMM instead bc the residuals for our best-fitting LMM are not normal.  This is POSSIBLY driven by a handful of outliers.
+
+# but also: try log-transforming your continuous response variable:
+lmm4 <- lmer(log(NPOC_nonfume) ~ feature+trtmnt + (1|repl), data = toc_fourvar)
+summary(lmm4)
+plot(lmm4)
+hist(resid(lmm4)) # residuals much more normally distributed, one outlier still.
 
 ```
-Next up: analyze rate by year. Collected in 2015/incubated in 2016:
-```{r analyze_rate_2015}
-library(lmerTest)
-inc_acc15 <- inc_acc %>% 
-  filter(year_col == "2015")
-hist(inc_acc15$ugC_gsoil_day, breaks = 100)
-
-lm <- lm(ugC_gsoil_day ~ treatment*soiltype, data=inc_acc15)
-anova(lm) # no interaction between treatment and soiltype, but definitely an effect of both fixed
-
-lm1 <- lm(ugC_gsoil_day ~ treatment + soiltype , data=inc_acc15)
-anova(lm1)
-hist(resid(lm1)) # not horribly abnormal, but also do want to incorporate the block as a random effect.
-
+Going to build the same model as above, but in GLMM (generalized linear mixed effects model) which can handle non-normal distributions of data (in our case, as explored above, gamma-distributed) to see if we can tease out trustworthy results without transforming the data (next step if this doesn't work)
+```{r soilC_glmm}
 # library(lme4)
-lmm15_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment + soiltype + (1|replicate), data = inc_acc15)
-anova(lmm15_rate)
-summary(lmm15_rate)
-hist(resid(lmm15_rate))
-qqnorm(resid(lmm15_rate))
-simulateResiduals(lmm15_rate, plot = TRUE)
+glmm1 <- glmer(NPOC_nonfume ~ trtmnt*feature + (1|repl),
+               data = toc_fourvar,
+               family = Gamma,
+               control = glmerControl(optimizer = "bobyqa",optCtrl = list(maxfun=2e5)))
+# model failed to converge, large eigenvalue; ned to check singularity/convergence tolerances on this one
+summary(glmm1)
 
-# log-transformed data:
-lmm15_2_rate <- lmerTest::lmer(log(ugC_gsoil_day)~treatment + soiltype + (1|replicate), data=inc_acc15)
-# look at ANOVA table for Type I (sequential type I anova table) from lmerTest package for analyzing LMER objects
-anova(lmm15_2_rate) # effect of treatment and not soiltype in 2015!  fascinatinggggg.
+# drop interaction between treatment and feature:
+glmm2 <- glmer(NPOC_nonfume ~ trtmnt+feature + (1|repl),
+               data = toc_fourvar,
+               family = Gamma,
+               control = glmerControl(optimizer = "bobyqa",optCtrl = list(maxfun=2e5)))
+summary(glmm2)
 
-summary(lmm15_2_rate, test = adjusted("holm"))
-hist(resid(lmm15_2_rate))
-simulateResiduals(lmm15_2_rate, plot = TRUE) # this is the model to stick with for 2015 rate data
+glmm3 <- glmer(NPOC_nonfume ~ feature + (1|repl),
+               data = toc_fourvar,
+               family = Gamma)
+summary(glmm3)
 
-# tukey's post-hoc tests to determine effects of treatment (tukey is default):
-e2015 <- emmeans(lmm15_2_rate,
-                 specs = pairwise ~ "treatment", # compare across treatment
-                 type = "response")  # convert back from log transformation
-e2015$emmeans     # examine modeled means
-e2015$contrasts   # examine p-values of pairwise comparisons
+# compare models despite convergence issues:
+anova(glmm1, glmm2) # no significant difference between the models, plus glmm2 has lower AIC/BIC values; drop the interaction.
+anova(glmm2, glmm3) # hmm!  glmm2 has lower AIC but higher BIC (barely).  significant difference between the two.  but in the interest of bringing my brain to the party, realize that there is a significant difference between MWC and O soils (at least for soil DOC) according to glmm2 so do not drop this fixed term.  Makes it easier to 'choose' glmm2, which includes treatment as a fixed effect with NO interaction.
+
+# adjust link function (default is inverse, and can be an issue according to Ben Bolker) to log link function. This is *possibly* okay considering that I'm already considering log-transforming my data due to the outliers/right-skewness. This is funcitonally the same as a linear model with log-transformed data, so we're comparing arithmetic means here (not geometric mean).
+glmm4 <- glmer(NPOC_nonfume ~ trtmnt+feature + (1|repl),
+               data = toc_fourvar,
+               family = Gamma(link = "log"))
+# model converged!
+summary(glmm4) # same output; significant differences between O and MWC for treatment, and between OM and UT compared to OS.
+anova(glmm2, glmm4) # glmm4 is EVER SO SLIGHTLY a better fit than glmm3.
+
+glmm5 <- glmer(NPOC_nonfume ~ trtmnt+feature + (1|repl),
+               data = toc_fourvar,
+               family = Gamma(link = "identity"))
+# huh!  also converged.
+summary(glmm5)
+anova(glmm4, glmm5) # glmm 4 still ever so slightly better according to AIC, BIC, loglik
+
+# plot residuals of glmm4:
+# The following code demonstrate producing a residual plot on the link scale.
+ggplot(data.frame(eta=predict(glmm4,type="link"),
+                  pearson=residuals(glmm4,type="pearson")),
+      aes(x=eta,y=pearson)) +
+    geom_point() +
+    theme_bw()
+# independent variable by variable
+ggplot(data.frame(x1=toc_long$feature,pearson=residuals(glmm4,type="pearson")),
+      aes(x=x1,y=pearson)) +
+    geom_point() +
+    theme_bw() #hmm some outlier-y behavior in residuals for UT
+ggplot(data.frame(x1=toc_long$trtmnt,pearson=residuals(glmm4,type="pearson")),
+      aes(x=x1,y=pearson)) +
+    geom_point() +
+    theme_bw() #outlier residuals in O, MWC
+qqnorm(residuals(glmm4))
+
+# histogram of the residuals 
+hist(resid(glmm4)) #MORE normally distributed but still less so than log-transformed data (lmm4)
 ```
 
-Collected in 2016/incubated in 2017:
-```{r analyze_rate_2016}
-inc_acc16 <- inc_acc %>% 
-  filter(year_col == "2016")
-hist(inc_acc16$ugC_gsoil_day, breaks = 100)
+So at this point, it's a matter of deciding if I want to go with a linear mixed effects model on log-transformed data or a GLMM on non-transformed data, but with a log link function (e.g. log of means, rather than log of response variable then mean'ed).  So we want to do some digging into our model diagnosics using the package DHARMa, which allows for residual testing for mixed models.
+```{r DHARMa}
+library(DHARMa)
+plotResiduals(glmm4, form = toc_fourvar$feature)
+simulateResiduals(glmm4, plot=TRUE)
+# non-normally distributed residuals, and have within-group deviations from uniformity e.g. homogeneity of variance is false (heteroskedasticity)
+testDispersion(glmm4)
+testZeroInflation(glmm4)
 
-lm <- lm(ugC_gsoil_day ~ treatment*soiltype, data=inc_acc16)
-anova(lm) # no interaction, just impact of soiltype (keep treatment in model)
+plotResiduals(lmm4, form = toc_fourvar$feature)
+simulateResiduals(lmm4, plot=TRUE)
+testDispersion(lmm4)
+# ok so based on these model diagnostics, it looks like log-transformed data is actually the way to go.  some outliers but the residuals look much better.
 
-lm1 <- lm(ugC_gsoil_day ~ treatment + soiltype , data=inc_acc16)
-anova(lm1)
-hist(resid(lm1)) # also do want to incorporate the block as a random effect.
+anova(glmm4, lmm4)
+# okay wow yeah.  much lower AIC, BIC, and smaller loglik values.  p-value for the difference between the two is highly significant.
 
-lmm16_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment + soiltype + (1|replicate), data = inc_acc16)
-anova(lmm16_rate)
-hist(resid(lmm16_rate))
-simulateResiduals(lmm16_rate, plot = TRUE) # almost there, but not quite
-
-lmm16_2_rate <- lmerTest::lmer(log(ugC_gsoil_day) ~ treatment + soiltype + (1|replicate), data=inc_acc16)
-# look at ANOVA table for Type I (sequential type I anova table) from lmerTest package for analyzing LMER objects
-anova(lmm16_2_rate) # effect of both treatment and soiltype in this model
-
-summary(lmm16_2_rate)
-hist(resid(lmm16_2_rate))
-simulateResiduals(lmm16_2_rate, plot = TRUE) # okay things look good.  moving on.  both treatment and soiltype effect on soils from 2016.
-
-# tukey's post-hoc tests to determine effects of treatment (tukey is default):
-e2016 <- emmeans(lmm16_2_rate,
-                 specs = pairwise ~ soiltype|treatment, # compare across treatment + soiltype
-                 type = "response")  # convert back from log transformation
-e2016$emmeans     # examine modeled means
-e2016$contrasts   # examine p-values of pairwise comparisons
-
-# note: did the below comparison with just treatment too, and no individual comparison was statistically significant to p < 0.05 (though MWC/C was close)
-
-# okay within-gropu comparison was illuminating re: feature. Now just do feature:
-e2016_2 <- emmeans(lmm16_2_rate,
-                   specs = pairwise ~ "soiltype",
-                   type = "response")
-e2016_2$emmeans
-e2016_2$contrasts
+## the following package allows you to get reports/p-values for the LMER objects which do not produce p-values
+library(devtools)
+# devtools::install_github("easystats/report")
+library(report)
+report(lmm4)
+# report(glmm4)
 ```
 
-Collected in 2018/incubated in 2018:
-```{r analyze_rate_2016}
-inc_acc18 <- inc_acc %>% 
-  filter(year_col == "2018")
-hist(inc_acc18$ugC_gsoil_day, breaks = 100)
+I want to visualize the model outputs: https://lmudge13.github.io/sample_code/mixed_effects.html
+```{r visualizemodels}
+library(tidyverse) #for all data wrangling
+library(cowplot) #for manuscript ready figures
+library(lme4) #for lmer & glmer models
+# devtools::install_github("strengejacke/sjPlot", force=TRUE) #for plotting lmer and glmer mods
+library(sjPlot)
+library(sjmisc)
+library(effects)
+library(sjstats) #use for r2 functions
 
-lm <- lm(ugC_gsoil_day ~ treatment*soiltype, data=inc_acc18)
-anova(lm) # interaction, and individual impacts of both fixed effects
-
-lmm18_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment*soiltype + (1|replicate), data = inc_acc18)
-anova(lmm18_rate)
-hist(resid(lmm18_rate), breaks = 100)
-simulateResiduals(lmm18_rate, plot = TRUE) # almost there, but not quite
-
-lmm18_2_rate <- lmerTest::lmer(log(ugC_gsoil_day) ~ treatment*soiltype + (1|replicate), data=inc_acc18)
-# look at ANOVA table for Type I (sequential type I anova table) from lmerTest package for analyzing LMER objects
-anova(lmm18_2_rate, type=c("I")) # effect of treatment, soiltype, and the interaction in 2018
-
-summary(lmm18_2_rate)
-hist(resid(lmm18_2_rate), breaks = 100)
-qqnorm(resid(lmm18_2_rate))
-simulateResiduals(lmm18_2_rate, plot = TRUE) # Hmm; despite looking okay in terms of qqplot and relatively normal-looking residuals, both DHARMa tests are showing deviations from the norm. Gonna go with this model for now anyway (Aug 3rd, 2021) because it otherwise looks ok.
-plotResiduals(lmm18_2_rate)
-
-##########################
-# tukey's post-hoc tests to determine effects of treatment (tukey is default):
-e2018 <- emmeans(lmm18_2_rate,
-                 specs = pairwise ~ soiltype|treatment, # compare across treatment + soiltype
-                 type = "response")  # convert back from log transformation
-e2018$emmeans     # examine modeled means
-e2018$contrasts   # examine p-values of pairwise comparisons
-
-e2018_3 <- emmeans(lmm18_2_rate,
-                   specs = pairwise ~ treatment,
-                   type = "response")
-e2018_3$emmeans
-e2018_3$contrasts
-
-# okay within-gropu comparison was illuminating re: feature. Now just do feature:
-e2018_2 <- emmeans(lmm18_2_rate,
-                   specs = pairwise ~ "soiltype",
-                   type = "response")
-e2018_2$emmeans
-e2018_2$contrasts
-
+# make table of model results:
+sjPlot::tab_model(lmm4)
+sjPlot::tab_model(lmm4,
+                  show.re.var = TRUE,
+                  pred.labels = c("(Intercept)", "under tree", "termite mound",
+                                  "wildlife only", "cattle only", "no herbivores"),
+                  dv.labels = "Effects of treatment or soil type on soil DOC (log scale)")
+# plot model results too (effect sizes):
+sjPlot::plot_model(lmm4,
+                   order.terms = c(3, 4, 5, 1, 2), # for some reason this one was in a different order than the others, so manually order here and label in next line
+                   axis.labels = c("termite mound", "under tree", "no herbivores", "cattle only", "wildlife only"),
+                   show.values = TRUE, show.p = TRUE,
+                   title = "Effect of treatment and soil type on soil DOC (log scale)",
+                   vline.color = "pink")+
+  theme_cowplot()
 ```
 
-Interaction plot for 2018:
-```{r 2018_interaction}
-interaction.plot(
-  x.factor = inc_acc18$treatment,
-  trace.factor = inc_acc18$soiltype,
-  response = inc_acc18$ugC_gsoil_day,
-  fun = median,
-  ylab = expression(paste("carbon accumulated " (mu*"g/g soil"))),
-  xlab = "treatment",
-  trace.label = "soil type",
-  lwd = 3,
-  col = c("#E69F00", "#009E73", "#D55E00")
-)
+
+Okay!  time to run models and diagnostics on the other three variables.
+```{r soil_DON}
+### full LINEAR model to examine residuals, soil DOC:
+lm_DON <- lm(TN_nonfume ~ trtmnt*feature, data = toc_fourvar)
+summary(lm_DON) # no interaction between treatment and soil type, drop from full model
+plot(lm_DON) # outliers, heteroskedasticity, and non-normality of residuals; either glmm or log-transformation
+
+# linear mixed model, full model
+lmm1_don <- lmer(TN_nonfume ~ trtmnt*feature + (1|repl), data=toc_fourvar)
+summary(lmm1_don)
+sjPlot::tab_model(lmm1_don) # no interaction between treatment and feature, drop
+
+lmm2_don <- lmer(TN_nonfume ~ trtmnt+feature + (1|repl), data=toc_fourvar)
+summary(lmm2_don)
+sjPlot::tab_model(lmm2_don) # significant effect of O treatment, again.  keep 'trtmnt'.
+qqnorm(resid(lmm2_don, type = "pearson")) # still has outliers!
+
+lmm3_don <- lmer(log(TN_nonfume)~trtmnt*feature + (1|repl), data=toc_fourvar)
+summary(lmm3_don)
+sjPlot::tab_model(lmm3_don) # drop interaction for log-transformed model
+
+lmm4_don <- lmer(log(TN_nonfume) ~ trtmnt + feature + (1|repl), data=toc_fourvar)
+summary(lmm4_don)
+sjPlot::tab_model(lmm4_don) 
+
+# DHARMa diagnostics:
+plotResiduals(lmm4_don, form = toc_fourvar$feature) #: within-group deviation from uniformity n.s.; Levene Test for homogeneity of variance significant; because we know this, at least across features, we know that variation of residuals across groups are not constant.  Should consider modelling variances, e.g. via ~dispformula in glmmTMB?  but also no significant problems detected across groups in residual vs. predicted plot.  CONFUSED.
+simulateResiduals(lmm4_don, plot=TRUE) # some outliers but no problematic points
+testDispersion(lmm4_don)
+
+anova(lmm3_don, lmm4_don) #lmm4 (with just main effect not interaction) is a better fit according to AIC, BIC parameters.
+
+# table of model outcomes:
+sjPlot::tab_model(lmm4_don)
+sjPlot::tab_model(lmm4_don,
+                  show.re.var = TRUE,
+                  pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                  "under tree", "termite mound"))
+
+# plot model outcomes:
+sjPlot::plot_model(lmm4_don,
+                   axis.labels = c("termite mound", "under tree", "no herbivores",
+                                   "cattle only", "wildlife only"),
+                   show.values = TRUE, show.p = TRUE,
+                   title = "Effect of treatment and soil type on soil DON (log scale)",
+                   vline.color = "pink")+
+  theme_cowplot()
+```
+
+Microbial biomass carbon analysis:
+```{r micro_DOC}
+# full model, no mixed effects
+lm_mic <- lm(NPOC_flush ~ trtmnt*feature, data = toc_fourvar)
+summary(lm_mic) # no interaction between treatment and soil type, drop from full model
+plot(lm_mic) # outliers, heteroskedasticity, and non-normality of residuals; either glmm or log-transformation of data
+
+# full model with mixed effects, interaction between treatment and soil feature:
+lmm1_mic <- lmer(NPOC_flush ~ trtmnt*feature + (1|repl), data=toc_fourvar)
+summary(lmm1_mic)
+sjPlot::tab_model(lmm1_mic)# no interaction between treatment and feature, drop
+qqnorm(resid(lmm1_mic)) # huh just two outliers...
+simulateResiduals(lmm1_mic, plot=TRUE) # residuals deviation from normality significant (qq plot) and heteroskedasticity across groups
+
+# full model with mixed effects, interaction between treatment and soil feature, on LOG TRANSFORMED data:
+lmm2_mic <- lmer(log(NPOC_flush) ~ trtmnt*feature + (1|repl), data=toc_fourvar)
+summary(lmm2_mic)
+sjPlot::tab_model(lmm2_mic)# no interaction between treatment and feature, drop
+simulateResiduals(lmm2_mic, plot=TRUE) # residuals normally distributed, no heteroscedasticiy detected across groups
+
+# model with mixed effects, no interaction
+lmm3_mic <- lmer(log(NPOC_flush) ~ trtmnt + feature + (1|repl), data=toc_fourvar)
+summary(lmm3_mic)
+sjPlot::tab_model(lmm3_mic) # no impact of treatment, funnily.  drop to see how iti mpacts things.
+
+simulateResiduals(lmm3_mic, plot=TRUE) # looks alright
+
+# table of model outcomes:
+sjPlot::tab_model(lmm3_mic)
+sjPlot::tab_model(lmm3_mic,
+                  show.re.var = TRUE,
+                  pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                  "under tree", "termite mound"))
+
+# plot model outcomes:
+sjPlot::plot_model(lmm3_mic,
+                   axis.labels = c("termite mound", "under tree", "no herbivores",
+                                   "cattle only", "wildlife only"),
+                   show.values = TRUE, show.p = TRUE,
+                   title = "Effect of treatment and soil type on soil microbial biomass carbon (log scale)",
+                   vline.color = "pink")+
+  theme_cowplot()
+```
+Microbial biomass nitrogen:
+```{r micro_DON}
+# full model, no mixed effects
+lm_mic_tn <- lm(TN_flush ~ trtmnt*feature, data = toc_fourvar)
+summary(lm_mic_tn) # no interaction between treatment and soil type, drop from full model
+plot(lm_mic_tn) # outliers, heteroskedasticity, and non-normality of residuals; either glmm or log-transformation of data
+
+# full model with mixed effects, interaction between treatment and soil feature:
+lmm1_mic_tn <- lmer(TN_flush ~ trtmnt*feature + (1|repl), data=toc_fourvar)
+summary(lmm1_mic_tn)
+sjPlot::tab_model(lmm1_mic_tn) # no interaction between treatment and feature, drop
+simulateResiduals(lmm1_mic_tn, plot=TRUE) # residuals deviation from normality significant (qq plot) and heteroskedasticity across groups
+
+# full model with mixed effects, interaction between treatment and soil feature, on LOG TRANSFORMED data:
+lmm2_mic_tn <- lmer(log(TN_flush) ~ trtmnt*feature + (1|repl), data=toc_fourvar)
+summary(lmm2_mic_tn)
+sjPlot::tab_model(lmm2_mic_tn) # okay weird; no significant effect at all, of any parameter
+simulateResiduals(lmm2_mic_tn, plot=TRUE) # residuals normally distributed, no heteroscedasticiy detected across groups
+
+# model with mixed effects, no interaction
+lmm3_mic_tn <- lmer(log(TN_flush) ~ trtmnt + feature + (1|repl), data=toc_fourvar)
+summary(lmm3_mic_tn)
+sjPlot::tab_model(lmm3_mic_tn) # okay so no impact of treatment, but significant impacts of feature.  feels weird to do this after no effect in previous model?  but had already detected no interaction in non-log-transformed data, so I think this is fine.
+simulateResiduals(lmm3_mic_tn, plot = TRUE) # cool; normally distributed residuals, evenly dispersed variance across groups
+
+# table of model outcomes:
+sjPlot::tab_model(lmm3_mic_tn)
+sjPlot::tab_model(lmm3_mic_tn,
+                  show.re.var = TRUE,
+                  pred.labels = c("(Intercept)", "wildlife only", "cattle only", "no herbivores",
+                  "under tree", "termite mound"))
+
+# plot model outcomes:
+sjPlot::plot_model(lmm3_mic_tn,
+                   axis.labels = c("termite mound", "under tree", "no herbivores",
+                                   "cattle only", "wildlife only"),
+                   show.values = TRUE, show.p = TRUE,
+                   title = "Effect of treatment and soil type on soil microbial biomass nitrogen (log scale)",
+                   vline.color = "pink")+
+  theme_cowplot()
+```
+
+Next up we want to use the eemeans package to run pairwise comparisons of these models that accounts for multiple comparisons. We're going to stick with comparisons *just* across feature for all four response variables despite the fact that there is some effect of treatment for soil DOC and DON; this is the comparison we're interested in, and we already know that there is no significant difference between treatments other than MWC and O (did try those pairwise comparisons already). (See meeting notes with Josh Sat. July 31st 2021.)
+```{r pairwise}
+# reminder of models we're keeping:
+# lmm3_mic (microbial biomass carbon), lmm3_mic_tn (microbial biomass nitrogen), lmm4_don (soil DON), and lmm4 (soil DOC)
+# https://aosmith.rbind.io/2019/03/25/getting-started-with-emmeans/#back-transforming-results
+
+# this command does all pairwise comparisons with the model, and automatically adjusts for multiple comparisons with a Bonferroni correction. Type = "response" allows for the estimates and CI's to be back-transformed from the original log scale, though the test itself is on the model (aka log-transformed) scale. Simple = "each" constrains the pairwise comparisons to those between the fixed effects (treatment and feature).
+
+# below I'm making a test dataframe/linear model for the log-transformed data, because for some reason the function to plot the data (both response and modeled response) is not working with log within the lmer model itself.  Not sure what's up, but since it's just to get the individual points on the plot, we can use an LM of the log-transformed data as below. See https://www.middleprofessor.com/files/applied-biostatistics_bookdown/_book/issues.html
+toc_fourvar$log_NPOC <- log(toc_fourvar$NPOC_nonfume)
+testmod <- lmer(log_NPOC ~ feature+trtmnt+(1|repl), data = toc_fourvar)
+
+# calculate estimated marginal means and pairwise comparisons for soil DOC (the real model used here, so we can get the real p-values and confidence intervals in the contrast table below):
+emm_soilDOC <- emmeans(lmm4, specs = "feature")
+
+# also make a testmod table for estimated means, for putting points on the plot, see https://www.middleprofessor.com/files/applied-biostatistics_bookdown/_book/issues.html, since this command doesn't seem to be able to handle models with log-transformed data
+emm_testmod <- emmeans(testmod,
+                       specs = "feature")
+
+# compute contrasts table of estimated effects with confidence intervals and p-values, using real emmeans table from two steps above
+lmm4_simple <- contrast(emm_soilDOC, # use the real model here to calculate pairwise comparisons
+                        method = "pairwise",
+                        simple = "each",
+                        combine = TRUE,
+                        type = "response") %>% 
+  summary(infer = TRUE)
+
+# plot response: this response has both the modeled means (big points with error bars) and the actual data (log-transformed small jittered)
+ggplot_the_response(
+  fit = testmod,                 # plots jittered (log-transformed) points on plot
+  fit_emm = emm_soilDOC,         # plots model fit points (large points) on plot
+  fit_pairs = lmm4_simple,       # plots pairwise comparisons on plot
+  palette = pal_okabe_ito_blue,
+  y_label = "soil DOC concentration, mg/kg soil (natural log scale)"
+)+
+  scale_x_discrete(labels=c("OS" = "Open Soil", "UT" = "Under Tree",
+                              "OM" = "Termite Mound"))
+```
+soil DON:
+```{r soilDON}
+toc_fourvar$log_TN <- log(toc_fourvar$TN_nonfume)
+testmod <- lmer(log_TN ~ feature+trtmnt+(1|repl), data = toc_fourvar)
+
+# calculate estimated marginal means and pairwise comparisons for soil DOC (the real model used here, so we can get the real p-values and confidence intervals in the contrast table below):
+emm_soilDON <- emmeans(lmm4_don, specs = "feature")
+
+# also make a testmod table for estimated means, for putting points on the plot, see https://www.middleprofessor.com/files/applied-biostatistics_bookdown/_book/issues.html, since this command doesn't seem to be able to handle models with log-transformed data
+emm_testmod <- emmeans(testmod,
+                       specs = "feature")
+
+# compute contrasts table of estimated effects with confidence intervals and p-values, using real emmeans table from two steps above
+lmm4_simple <- contrast(emm_soilDON, # use the real model here to calculate pairwise comparisons
+                        method = "pairwise",
+                        simple = "each",
+                        combine = TRUE,
+                        type = "response") %>% 
+  summary(infer = TRUE)
+
+# plot response: this response has both the modeled means (big points with error bars) and the actual data (log-transformed small jittered)
+ggplot_the_response(
+  fit = testmod,                 # plots jittered (log-transformed) points on plot
+  fit_emm = emm_soilDON,         # plots model fit points (large points) on plot
+  fit_pairs = lmm4_simple,       # plots pairwise comparisons on plot
+  palette = pal_okabe_ito_blue,
+  y_label = "soil DON concentration, mg/kg soil (natural log scale)"
+)+
+  scale_x_discrete(labels=c("OS" = "Open Soil", "UT" = "Under Tree",
+                              "OM" = "Termite Mound"))
+```
+microbial biomass C:
+```{r micC}
+toc_fourvar$log_micC <- log(toc_fourvar$NPOC_flush)
+testmod <- lmer(log_micC ~ feature+trtmnt+(1|repl), data = toc_fourvar)
+
+# calculate estimated marginal means and pairwise comparisons for soil DOC (the real model used here, so we can get the real p-values and confidence intervals in the contrast table below):
+emm_micC <- emmeans(lmm3_mic, specs = "feature")
+
+# also make a testmod table for estimated means, for putting points on the plot, see https://www.middleprofessor.com/files/applied-biostatistics_bookdown/_book/issues.html, since this command doesn't seem to be able to handle models with log-transformed data
+emm_testmod <- emmeans(testmod,
+                       specs = "feature")
+
+# compute contrasts table of estimated effects with confidence intervals and p-values, using real emmeans table from two steps above
+lmm4_simple <- contrast(emm_micC, # use the real model here to calculate pairwise comparisons
+                        method = "pairwise",
+                        simple = "each",
+                        combine = TRUE,
+                        type = "response") %>% 
+  summary(infer = TRUE)
+
+# plot response: this response has both the modeled means (big points with error bars) and the actual data (log-transformed small jittered)
+ggplot_the_response(
+  fit = testmod,                 # plots jittered (log-transformed) points on plot
+  fit_emm = emm_micC,         # plots model fit points (large points) on plot
+  fit_pairs = lmm4_simple,       # plots pairwise comparisons on plot
+  palette = pal_okabe_ito_blue,
+  y_label = "microbial biomass C, mg/kg soil (natural log scale)"
+)+
+  scale_x_discrete(labels=c("OS" = "Open Soil", "UT" = "Under Tree",
+                              "OM" = "Termite Mound"))
+```
+microbial biomass N:
+```{r micN}
+toc_fourvar$log_micN <- log(toc_fourvar$TN_flush)
+testmod <- lmer(log_micN ~ feature+trtmnt+(1|repl), data = toc_fourvar)
+
+# calculate estimated marginal means and pairwise comparisons for soil DOC (the real model used here, so we can get the real p-values and confidence intervals in the contrast table below):
+emm_micN <- emmeans(lmm3_mic_tn, specs = "feature")
+
+# also make a testmod table for estimated means, for putting points on the plot, see https://www.middleprofessor.com/files/applied-biostatistics_bookdown/_book/issues.html, since this command doesn't seem to be able to handle models with log-transformed data
+emm_testmod <- emmeans(testmod,
+                       specs = "feature")
+
+# compute contrasts table of estimated effects with confidence intervals and p-values, using real emmeans table from two steps above
+lmm4_simple <- contrast(emm_micN, # use the real model here to calculate pairwise comparisons
+                        method = "pairwise",
+                        # simple = "each",
+                        combine = TRUE,
+                        type = "response") %>% 
+  summary(infer = TRUE)
+
+# plot response: this response has both the modeled means (big points with error bars) and the actual data (log-transformed small jittered)
+ggplot_the_response(
+  fit = testmod,                 # plots jittered (log-transformed) points on plot
+  fit_emm = emm_micN,         # plots model fit points (large points) on plot
+  fit_pairs = lmm4_simple,       # plots pairwise comparisons on plot
+  palette = pal_okabe_ito_blue,
+  y_label = "microbial biomass N, mg/kg soil (natural log scale)"
+)+
+  scale_x_discrete(labels=c("OS" = "Open Soil", "UT" = "Under Tree",
+                              "OM" = "Termite Mound"))
+
+View(lmm4_simple)
+```
+## April 15, 2022
+# Additional analyses
+Exploration of CN ratios
+Exploration of total soil carbon (aka both extractable organic carbon and microbial biomass carbon)
+
+FIRST UP: CN ratios of soil microbial communities
+```{r}
+# use forecats to reorder data:
+toc <- toc %>% 
+  mutate(feature=fct_relevel(feature, "OS", "UT", "OM")) %>% 
+  mutate(trtmnt=fct_relevel(trtmnt, "MWC", "MW", "C", "O"))
+
+library(reshape2)
+# melt data to long form for histograms:
+toc_long2 <- melt(data = toc,
+                 id.vars = c("repl","trtmnt","feature","ID"),
+                 variable.name = "soil_variable",
+                 value.name = "ugC_gsoil")
+
+# in addition, calculate CN ratio of microbial biomass (higher = fungal dominated, lower = bacteria dominated)
+toc$micCN_ratio <- toc$NPOC_flush / toc$TN_flush
+
+# look for outliers!
+hist(toc$micCN_ratio, breaks=100) # yes one weirdo outlier way out in the boonies at 100, one at 75, and a handful at 40. Generally speaking I think it'd be ok to eliminate those because soil microbial CN ratios just...can't be that high (and indeed are closer to like, 8:1).
+# take out those higher than 25 (there's a break in the data there).
+toc_micCN <- toc %>% 
+  filter(micCN_ratio < 25)
+hist(toc_micCN$micCN_ratio, breaks = 200) # still right-skewed
 
 mypalette <- c("#E69F00", "#009E73", "#D55E00")
-
-plot_model(lmm18_2_rate, type = "pred", terms = c("treatment", "soiltype"))+
+toc_micCN %>% 
+  ggplot(aes(x=feature, y=log(micCN_ratio), fill = feature))+
+  labs(x ="" , y = "log transformed microbial C:N")+
+  geom_boxplot()+
   theme_classic()+
-  scale_color_manual(values = mypalette) #color-blind friendly palette
-  
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())+
+  scale_fill_manual("",  
+                      labels = c("OS" = "grassland matrix", 
+                                 "UT" = "tree canopy",
+                                 "OM" = "termite mound"), 
+                    values = mypalette)+
+                      theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())
 
-# both methods of producing a plot demonstrate an interaction between treatment and soiltype, but just for OM and OS soils; not UT.
-# - OS soils always have lower rates of mineralization than OM *except* in MW plots, where the relationship is switched.
-# - no matter what, UT soils have the highest rate of interaction
+```
+
+Let's get down to model testing.
+```{r}
+# test model:
+test_lm <- lm(micCN_ratio ~ trtmnt*feature, data = toc_micCN)
+summary(test_lm)
+plot(test_lm)
+simulateResiduals(test_lm, plot=TRUE)
+# data is very non-normally distributed!  outliers and deviation from normal. Within-group deviations of variance
+
+hist(toc$micCN_ratio, breaks=100) # yes one weirdo outlier way out in the boonies at 100, one at 75, and a handful at 40. Generally speaking I think it'd be ok to eliminate those because soil microbial CN ratios just...can't be that high (and indeed are closer to like, 8:1).
+# take out those higher than 25 (there's a break in the data there).
+toc_micCN <- toc %>% 
+  filter(micCN_ratio < 25)
+hist(toc_micCN$micCN_ratio, breaks = 200) # still right-skewed
+
+# add random effect aka lme function (nlme package)
+test_lme <- lme(micCN_ratio ~ trtmnt*feature, random=~1|repl, data = toc_micCN)
+summary(test_lme)
+qqnorm(test_lme) #qqplot shows hump in the middle
+hist(resid(test_lme)) #residuals are close to normal but a bit right-skewed
+
+# test different distributions aside from normal:
+fw <- fitdist(toc_micCN$micCN_ratio, "weibull")
+fg <- fitdist(toc_micCN$micCN_ratio, "gamma")
+fl <- fitdist(toc_micCN$micCN_ratio, "lnorm")
+par(mfrow = c(2, 2))
+plot.legend <- c("Weibull", "gamma", "lognormal")
+denscomp(list(fw, fg, fl), legendtext = plot.legend) #lognormal distribution looks better
+qqcomp(list(fw, fg, fl), legendtext = plot.legend) #again, lognormal
+cdfcomp(list(fw, fg, fl), legendtext = plot.legend) # gamma
+ppcomp(list(fw, fg, fl), legendtext = plot.legend) #ok, lognormal again.
+# so try modeling the distribution with a lognormal distribution, not a normal distribution. In this case you can go with a linear mixed effects model, since we'll be modeling on log-transformed data that thus has a normal distribution. (aka we can leave the generalized linear mixed-effects model for another time.)
+
+# LOG TRANSFORMATION LMM:
+test_lmm <- lmer(log(micCN_ratio) ~ feature*trtmnt + (1|repl), 
+                 data = toc_micCN)
+summary(test_lmm)
+plot(test_lmm)
+hist(resid(test_lmm)) # residuals much more normally distributed, but not totally
+report(test_lmm) # no interaction btw treatment and feature
+
+# drop interaction between treatment, feature
+test_lmm <- lmer(log(micCN_ratio) ~ feature+trtmnt + (1|repl), data = toc_micCN)
+summary(test_lmm)
+simulateResiduals(test_lmm, plot=TRUE)
+# library(report) # get p-values for your lmer model 
+report(test_lmm) # OM significantly lower CN ratio than soils from UT, OS; no effect of treatment on microbial CN. beta = -0.19, 95% CI [-0.29, -0.09], t(322) = -3.81, p < .001
+
+# also did some model testing with glmer, which does not require normal (gaussian) distribution of the residuals, but the best-fitting model in all those cases was still the lmm with log-transformed data here.
+
+# emmeans to do pairweise comparisons by feature:
+emm_cn <- emmeans(test_lmm, specs = "feature")
+emm_cn
+# contrast table:
+p <- contrast(emm_cn, method = "pairwise",
+                        simple = "each",
+                        combine = TRUE,
+                        type = "response") %>% 
+  summary(infer = TRUE)
+p
 ```
 
