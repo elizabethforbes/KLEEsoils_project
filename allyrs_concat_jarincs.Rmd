@@ -1,0 +1,286 @@
+---
+title: "allyrs_concat_jarincs"
+author: "Elizabeth Forbes"
+date: "11/24/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# load libraries
+library(forcats)
+library(plyr)
+library(tidyverse)
+library(calecopal)
+
+```
+
+# Analyzing jar incubations of soils collected from the KLEE
+## Soil samples:
+These data were collected by incubating soil samples collected from four large herbivore treatments in the KLEE (MWC, MW, C, and O). Within each of those four treatments, samples were collected from three landscape features: open soil (OS), under Acacia drepanolobium trees (UT), and active termite mounds (OM). In 2015, three of each feature were collected per treatment (9 samples per treatment, 108 total samples). In 2016 and 2018, 10 of each feature were collected per treatment (up to 30 samples per treatment, up to 360 samples total depending on availability of distinct and active termite mounds, e.g. some plots had fewer than 10 termite mound samples.)
+
+Soils collected in late summer (August) of 2015 were analyzed via jar incubation in winter 2016; soils collected in mid summer (July) of 2016 were analyzed in winter/spring 2017, and were also incubated again for additional analysis for total organic carbon and nitrogen in summer 2017 (respiration data not collected on second incubation); soils collected in mid-late summer (July/August) of 2018 were analyzed in September 2018. Prior to rewetting and incubation, soils were ground, sieved, and air-dried before being packaged in sealed plastic bags and stored in an opaque container within a dark cabinet.
+
+## Procedure:
+Dried soil samples were "re-wet" by adding enough water to bring them to 50% of their water-holding capacity (WHC).
+Wet samples were immediately sealed in airtight jars fitted with rubber septa; over the course of incubation, once per day a 1ml air sample was taken through these septa and analyzed in a flow-through Licor analyzer for its carbon dioxide concentration for each sample. In this way, buildup (and total accumulation) of carbon dioxide over time was tracked for each sample for one week.
+
+## Analysis:
+Incubation data are analyzed for both rate of carbon dioxide production (respiration) and total accumulation of carbon dioxide over the incubation period. In summary, these data are representative of the "potential respiration" of these soils: completely removed from their ecological context in the field, they represent the relationship between soil carbon content, soil microbial biomass (together, reflective of soil microbial respiration) per sample.
+
+## key:
+sample_ID: individual sample ID consisting of KLEE replicate, treatment, soil type, and soil replicate number.
+location: KLEE replicate (either N, C, or S)
+treatment: large herbivore treatment (either MWC, MW, C, or O)
+soiltype: landscape feature from which soil was collected within each treatment (either OS, UT, or OM)
+hrs_incubated: timepoint at which datapoint was taken; every 24hrs
+co2_acc: CO2 content of sample at that timepoint (additive over time)
+year_inc: year in which the soil sample was incubated (either 2016, 2017, or 2018)
+year_col: year in which the soil sample was collected from the KLEE (either 2015, 2016, or 2018)
+
+##1: data exploration reading, cleaning
+```{r}
+# read in data
+inc <- read.csv('incdat_allyrs_LONG.csv', header=TRUE)
+
+# the 2015/2016 data in particular has some weirdness in terms of the hours incubated column (e.g. I was very particular about accounting for each hour; howevever, this will make it hard to generalize the data in terms of means (e.g. what's the difference between 72 and 73 hours of incubation and can they be binned instead) and I do need to do that)).
+# conditionally replace the following numeric values in hrs_incubated:
+# 49 with 48
+# 73 with 72
+# 97 with 96
+# 98 with 96
+# 122 with 120
+# 146 with 144
+# and leave it there for now as not analyzing past 144 for the time being
+
+# first, create another df to work with:
+inc_b <- inc
+# then conditionally replace the hours in question on the new df:
+inc_b$hrs_incubated[inc_b$hrs_incubated == 49] <- 48
+inc_b$hrs_incubated[inc_b$hrs_incubated == 73] <- 72
+inc_b$hrs_incubated[inc_b$hrs_incubated == 97] <- 96
+inc_b$hrs_incubated[inc_b$hrs_incubated == 98] <- 96
+inc_b$hrs_incubated[inc_b$hrs_incubated == 122] <- 120
+inc_b$hrs_incubated[inc_b$hrs_incubated == 146] <- 144
+# subset out all observations over 144 total incubations hours for comparability across years:
+inc_b <- subset(inc_b, hrs_incubated <= 144)
+
+# next: need to add a column to inc_b that divides mgC carbon for each step by the number of grams of soil involved in the incubation. For year 2016 incubation, 20g; for years 2017 and 2018 incubations, 10g.
+# if year_inc == 2016, divide by 20g
+# else, divide by 10g
+inc_b$mgC_gsoil <- ifelse(inc_b$year_inc == 2016, inc_b$mgC/20, inc_b$mgC/10)
+
+# next: add column where mgC/gsoil is converted to microgC/g soil
+inc_b$ugC_gsoil <- inc_b$mgC_gsoil*1000
+
+# remove the 1 and 4 hour check points from the overall dataframe; only monitored respiration this closely for the first round of incubations, with low sample size, and need all three years of data to be comparable.
+inc_b <- inc_b[inc_b[,6] != 1,] # remove the 1hr points
+inc_b <- inc_b[inc_b[,6] != 4,] # remove the 4hr points
+
+# reorder treatment and soil type levels; first, set correct/desired order
+ord_trt <- as.factor(c("MWC", "MW", "C", "O"))
+ord_soil <- as.factor(c("OS", "UT", "OM"))
+#use forcats package to reorder:
+inc_b <- inc_b %>% 
+  mutate(treatment=fct_relevel(treatment, "MWC", "MW", "C", "O")) %>% 
+  mutate(soiltype=fct_relevel(soiltype, "OS", "UT", "OM"))
+
+# subset out the data into yearly dataframes for exploring:
+inc16 <- subset(inc_b, year_inc == 2016)
+inc17 <- subset(inc_b, year_inc == 2017)
+inc18 <- subset(inc_b, year_inc == 2018)
+```
+
+## 2: exploring data distribution
+```{r}
+# explore total accumulation data (timepoint = 144hrs)
+inc_acc <- inc_b %>% 
+  subset(hrs_incubated == 144)
+
+# explore data with histogram:
+ggplot(data=inc_acc)+
+  geom_histogram(mapping=aes(x=ugC_gsoil), bins=100)
+# as a whole, the data are pretty right-skewed.
+
+# separated by treatment:
+ggplot(data=filter(inc_acc))+
+  geom_histogram(mapping=aes(x=ugC_gsoil), bins=100)+
+  facet_wrap(~treatment)
+# okay so all the accumulation data is right-skewed.  This is for all years, however; is this true when I just look at one of the years?
+
+# by treatment and year incubated:
+ggplot(data=filter(inc_acc))+
+  geom_histogram(mapping=aes(x=ugC_gsoil), bins=100)+
+  facet_wrap(~treatment + year_inc)
+# for all years, also pretty right-skewed. Of course for 2016 far fewer samples in general bc the sample size was significantly lower.
+```
+
+# data exploration: time series
+```{r timeseries}
+# visualizing time series by treatment, landscape feature
+ggplot(inc_b, aes(x=hrs_incubated, y=ugC_gsoil, colour=soiltype, group=treatment)) +
+  geom_point()+
+  geom_smooth(se=F)
+
+# summarize ALL the data by treatment:
+inc_all_sum_trtmnt <- ddply(inc_b, c("hrs_incubated", "treatment", "year_inc"), summarise,
+               N    = sum(!is.na(ugC_gsoil)),
+               mean = mean(ugC_gsoil, na.rm=TRUE),
+               sd   = sd(ugC_gsoil, na.rm=TRUE),
+              se   = sd / sqrt(N))
+
+# color palette "oak" from the cal_palette package (An and Heili)
+# pal <- cal_palette("oak", 4)
+# pal <- c("maroon3", "limegreen", "slateblue1", "goldenrod1")
+pal <- c("MWC" = "#DC59B1", "MW" = "#ECD560", "C" = "#56B4E9", "O" = "#AFCB52")
+
+inc_all_sum_trtmnt %>% 
+  ggplot(aes(x=hrs_incubated, y=mean, fill=treatment))+
+  geom_line(aes(color=treatment), size = 1.25)+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_linedraw()+
+  # scale_color_grey(start = .9, end = .4)+
+  scale_color_manual(values = pal)+ #color-blind friendly palette
+  # scale_color_brewer(palette = "Dark2")+
+  facet_wrap(~year_inc)+
+  ylab(expression(paste("carbon concentration " (mu*"g/g soil"))))+
+  xlab("hours incubated")+
+  theme(legend.title = element_blank(), axis.text = element_text(size = 10), axis.title = element_text(size = 12))
+```
+
+```{r}
+# and by soil type:
+inc_all_sum_soiltype <- ddply(inc_b, c("hrs_incubated", "soiltype", "year_inc"), summarise,
+               N    = sum(!is.na(ugC_gsoil)),
+               mean = mean(ugC_gsoil, na.rm=TRUE),
+               sd   = sd(ugC_gsoil, na.rm=TRUE),
+               se   = sd / sqrt(N))
+# define palette to match the other plots for landscape feature:
+mypalette <- c("#E69F00", "#009E73", "#D55E00")
+
+inc_all_sum_soiltype %>% 
+  ggplot(aes(x=hrs_incubated, y=mean, fill=soiltype))+
+  geom_line(aes(colour=soiltype), size=1.25)+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=2, position = position_dodge(width=.9))+
+  theme_linedraw()+
+  scale_color_manual(values = mypalette)+ #color-blind friendly palette
+  facet_wrap(~year_inc)+
+  ylab(expression(paste("carbon concentration " (mu*"g/g soil"))))+
+  xlab("hours incubated")+
+  theme(legend.title = element_blank(), axis.text = element_text(size = 10), axis.title = element_text(size = 12))
+  # theme(legend.text = "none")
+```
+
+Next up: total accumulation over time:
+```{r accumulation}
+pal <- cal_palette("kelp1", 4)
+inc_b %>% 
+  filter(hrs_incubated == 144) %>% 
+  ggplot(aes(x=treatment, y=ugC_gsoil, fill=treatment))+
+  geom_boxplot()+
+  geom_jitter(color="black", size=0.5, alpha = 0.5)+
+  # geom_bar(position="dodge", stat="identity")+
+  # geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values=pal)+
+  facet_wrap(~year_inc)+
+  theme(legend.position = "none")
+
+inc_b %>% 
+  filter(hrs_incubated == 144) %>% 
+  ggplot(aes(x=soiltype, y=ugC_gsoil, fill=soiltype))+
+  geom_boxplot()+
+  geom_jitter(color="black", size=0.5, alpha=0.5)+
+  # geom_bar(position="dodge", stat="identity")+
+  # geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2, position = position_dodge(.9))+
+  theme_bw()+
+  scale_fill_manual(values=pal)+
+  facet_wrap(~year_inc)
+
+inc_b %>% 
+  filter(hrs_incubated == 144) %>% 
+  ggplot(aes(x=treatment, y=ugC_gsoil, fill=soiltype))+
+  geom_boxplot()+
+  # geom_jitter(color="red", size=0.5, alpha=0.5)+
+  theme_linedraw()+
+  scale_fill_manual(values=pal_okabe_ito_blue)+
+  facet_wrap(~year_inc)
+  
+
+```
+
+After visualiztion, it's time to build some models and examine residuals: going to go with the same basic methodology of Charles et al. 2021 (preprint on termite mound aerial cover and abundance in the KLEE).
+```{r basicexploration}
+# data exploration: boxplots of data by location, year_col (two possible random variables)
+boxplot(ugC_gsoil ~ location, data = inc_b, varwidth = TRUE) # data don't look super correlated within locations (N, C, or S) but good practice to include location as a random effect anyway in the KLEE
+# check for experimental year in influencing outcome:
+boxplot(ugC_gsoil ~ year_col, data = inc_b, varwidth = TRUE) # definintely a bit more of an effect of year
+# check for experimental year*location influence:
+boxplot(ugC_gsoil ~ year_col*location, data = inc_b, varwidth = TRUE) # a bit hard to interpret?  but both year of collection and location of collection seem possibly influential in total outcome
+
+#1: dotplot of data to explore potential outliers:
+inc_b %>% 
+  filter(hrs_incubated == 144) %>% # select for total accumulation amount
+  dotchart(ugC_gsoil, main = "treatment")
+
+dotchart(inc_b$ugC_gsoil, main = "treatment", groups = inc_b$hrs_incubated) # indicates that the longer an incubation goes on, the more likely an outlier is. However, I'm puzzled by this bc the soils are super heterogeneous to begin with. I'm not sure I'd transform any of these data. Hrs_incubated is the only continuous grouping variable I can use to compare
+
+#2: explore explanatory variables for collinearity (e.g. high correlation between explanatory vars)
+# use chi-squared analyses because the explanatory vars are all categorical, response is continuous (except for hrs_incubated). Evaluates how likely it is that any observed difference between the sets of categorical data arose by chance. have alrady used (table()) to look at the contingency tables and the spread of values is uniform except for year_col (because I collected far fewer samples in 2016 than in 2016, 2018).
+chisq.test(inc_b$year_col, inc_b$ugC_gsoil)
+```
+
+
+```{r comparisons}
+library(nlme)
+# explore a basic lm of just total accumulation data:
+basic.lm <- inc_b %>% 
+  filter(hrs_incubated == 144) %>% 
+  lm(ugC_gsoil ~ soiltype*treatment, .) # period as "data" placeholder when using lm with pipe
+summary(basic.lm)
+drop1(basic.lm, test = "F") # test the model against one where the interaction is dropped; results show no significant interaction between treatment and soil type
+# plot residuals vs. fitted:
+plot(basic.lm, which = 1) # perhaps some evidence of within-group variance -
+# plot qqplot:
+plot(basic.lm, which = 2) # okay, these residuals are not normally distributed, pretty right-skewed
+hist(resid(basic.lm), xlab="residuals", main = "")# right skewed, "minor evidence for non-normality" (Zurr pg. 24)
+
+```
+
+```{r DHARMa}
+# library(DHARMa)
+# using the DHARMa package to further think about model fitting
+# https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html
+
+# proposed model: total C accumulation analyzed by the (interaction of) soiltype and treatment level, with random effects of replicate block (N, C, S) and year the soil was collected
+# total accumulation of C ~ (soiltype * treatment) +1|block +1|year_collected
+
+# isolate accumulation data only
+total_acc <- inc_b %>% 
+  filter(hrs_incubated == 144) 
+
+library(lme4) #lmer function
+lme <- lmer(ugC_gsoil ~ soiltype*treatment + (1|year_col) + (1|location), total_acc)
+summary(lme)
+# treatment does not seem to interact with soil type
+lme.2 <- lmer(ugC_gsoil ~ soiltype + (1|location), total_acc)
+summary(lme.2)
+
+```
+
+
+```{r model selection}
+
+# compare total accumulation at 144 hours incubation (aka six full days)
+
+# compare accumulation rate: repeated measures model, with hrs_incubated as a fixed effect (aka non-random, non-independent)
+
+
+```
+
+
+## parking lot for ideas for analysis:
+Broken-line regression (to capture 'burst' of respiration post-rehydration):
+https://cran.r-project.org/web/packages/lm.br/vignettes/lm.br.pdf
+https://stackoverflow.com/questions/52023952/how-to-perform-broken-line-regression-analysis-in-r

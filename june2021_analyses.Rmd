@@ -1,0 +1,273 @@
+---
+title: "june2021_analyses"
+author: "Elizabeth Forbes"
+date: "5/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This doc is for data exploration/analyses related to jar incubations. Data are imported/cleaned in the other RMD doc in this project ("allyrs_concat_jarincs.Rmd"). Inc_b is all the data; inc16-18 are just those years' of data.
+
+The chunk is to analyze the incubation data for possible treatment effects: does treatment have an effect at all, within certain soil types, or is the main driver of effect soil type?
+- I would expect treatment to have some effect because increased carbon inputs into the soil from litter that isn't eaten by herbivores (e.g. O > MW, O > C)
+- so look at ANOVAs of each soil type against treatment for total accumulation (hr == 144) and repeated measures (aka rate of increase).
+```{r treatmenteffects_totacc}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(rstatix) #package for tidy stats
+
+# one-way ANOVA of open soil samples, total C accumulation:
+inc_b %>% 
+  filter(hrs_incubated == 144) %>%
+  filter(soiltype == "OS") %>% 
+  anova_test(ugC_gsoil ~ treatment) # significant effect of treatment on OS soils, p = 0.008
+# one-way ANOVA of open soil samples, total C accumulation, just 2018:
+# removed code but same as above, just added 'year_col' filter; significant effect of treatment in 2018, not 2015 or 2016. See notes from convo with Ana and Devyn about that. 
+
+# one-way ANOVA of under tree samples, total C accumulation:
+inc_b %>% 
+  filter(hrs_incubated == 144) %>%
+  filter(soiltype == "UT") %>% 
+  anova_test(ugC_gsoil ~ treatment) # NO significant treatment effect for UT soils, p = 0.34
+
+# one-way ANOVA of termite mound samples, total C accumulation:
+inc_b %>% 
+  filter(hrs_incubated == 144) %>%
+  filter(soiltype == "OM") %>% 
+  anova_test(ugC_gsoil ~ treatment) # significant effect of treatment on OM soils, p = 0.014
+
+# conclusion: there is a significant impact of treatment on soil type results, but perhaps only in 2018. 
+```
+
+So how does landscape feature influence [carbon metric], and does grazing treatment influence the relative size of this effect? (https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html)
+Proposed format:
+glmm(C ~ treatment * feature + year + 1|random)
+- random effects: treatment nested within block 
+- adding year as fixed effect but assuming that year (proxy for drought status) does not interact with treatment/feature on the fundamental level (e.g. carbon) over such a short period
+
+
+```{r setup}
+# model of total accumulation, with interaction between treatment and soil type plus fixed effect of year, and a random effect of treatment nested within location (block):
+# using both fixed and random effects, e.g. using GLMMs (generalized linear mixed models)
+inc_acc <- inc_b %>% 
+  filter(hrs_incubated == 144)
+summary(inc_acc)
+# make year_col a factor:
+inc_acc$year_col <- as.factor(inc_acc$year_col)
+
+# add a rate column: divide "ugC_gsoil" by six (total days) (per notes from Josh, July 31 2021)
+inc_acc$ugC_gsoil_day <- (inc_acc$ugC_gsoil)/6
+
+# remove NAs:
+inc_acc <- inc_acc[complete.cases(inc_acc[ ,12]),] 
+
+# histogram of rate data:
+hist(inc_acc$ugC_gsoil_day) # no major outliers, vaguely gamma-distributed
+
+```
+
+Model testing:
+```{r analyses}
+lm <- lm(ugC_gsoil_day ~ treatment*soiltype*year_col, data=inc_acc)
+anova(lm) # no interaction between treatment and soiltype, but definitely an effect of both fixed
+
+lm1 <- lm(ugC_gsoil_day ~ treatment*year_col + soiltype*year_col , data=inc_acc)
+anova(lm1)
+hist(resid(lm1)) # not horribly abnormal, but also do want to incorporate the block as a random effect.
+# library(DHARMa)
+simulateResiduals(lm1, plot = TRUE) # some abnormality in distribution of residuals
+
+# library(lme4)
+# library(lmerTest)
+# library(emmeans)
+lmm_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment*year_col + soiltype*year_col + (1|replicate), data = inc_acc)
+anova(lmm_rate)
+summary(lmm_rate)
+
+hist(resid(lmm_rate)) # honestly the residuals don't look too bad.
+
+simulateResiduals(lmm_rate, plot = TRUE) # well apparently they do, booooooo
+
+####################
+# log-transformation:
+lmm1_rate <- lmerTest::lmer(log(ugC_gsoil_day) ~ treatment*soiltype + 
+                              treatment*year_col + 
+                              soiltype*year_col +
+                              (1|replicate), data=inc_acc)
+# library(multcomp)
+anova(lmm1_rate) # all three fixed effects (treatment, soil type, and year) are significant; interaction between treatment and year is signficant, as is interaction between soiltype and year
+
+summary(lmm1_rate, test = adjusted("holm")) # use holm-bonferroni correction for multiple testing
+hist(resid(lmm1_rate)) # cautiously optimistic
+qqnorm(resid(lmm1_rate)) # hey this looks okay!
+simulateResiduals(lmm1_rate, plot = TRUE) # huh; better, but not quite there.
+plotResiduals(lmm1_rate, form = inc_acc$soiltype) # looks like there is some non-homogeneity of variance within the OM group of data, but across treatments it's okay.  Gonna just be alright with that; when I analyze by year it might be interesting.
+anova(lmm1_rate)
+
+inc_acc %>% 
+  group_by(year_col) %>% 
+  get_summary_stats(ugC_gsoil_day, type = "mean_se")
+
+# what was the effect of drought for pairwise comparisons?
+emmeans(lmm1_rate, specs = pairwise ~ "year_col", type = "response")
+
+```
+Next up: analyze rate by year. Collected in 2015/incubated in 2016:
+```{r analyze_rate_2015}
+library(lmerTest)
+inc_acc15 <- inc_acc %>% 
+  filter(year_col == "2015")
+hist(inc_acc15$ugC_gsoil_day, breaks = 100)
+
+lm <- lm(ugC_gsoil_day ~ treatment*soiltype, data=inc_acc15)
+anova(lm) # no interaction between treatment and soiltype, but definitely an effect of both fixed
+
+lm1 <- lm(ugC_gsoil_day ~ treatment + soiltype , data=inc_acc15)
+anova(lm1)
+hist(resid(lm1)) # not horribly abnormal, but also do want to incorporate the block as a random effect.
+
+# library(lme4)
+lmm15_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment + soiltype + (1|replicate), data = inc_acc15)
+anova(lmm15_rate)
+summary(lmm15_rate)
+hist(resid(lmm15_rate))
+qqnorm(resid(lmm15_rate))
+simulateResiduals(lmm15_rate, plot = TRUE)
+
+# log-transformed data:
+lmm15_2_rate <- lmerTest::lmer(log(ugC_gsoil_day)~treatment + soiltype + (1|replicate), data=inc_acc15)
+# look at ANOVA table for Type I (sequential type I anova table) from lmerTest package for analyzing LMER objects
+anova(lmm15_2_rate) # effect of treatment and not soiltype in 2015!  fascinatinggggg.
+
+summary(lmm15_2_rate, test = adjusted("holm"))
+hist(resid(lmm15_2_rate))
+simulateResiduals(lmm15_2_rate, plot = TRUE) # this is the model to stick with for 2015 rate data
+
+# tukey's post-hoc tests to determine effects of treatment (tukey is default):
+e2015 <- emmeans(lmm15_2_rate,
+                 specs = pairwise ~ "treatment", # compare across treatment
+                 type = "response")  # convert back from log transformation
+e2015$emmeans     # examine modeled means
+e2015$contrasts   # examine p-values of pairwise comparisons
+```
+
+Collected in 2016/incubated in 2017:
+```{r analyze_rate_2016}
+inc_acc16 <- inc_acc %>% 
+  filter(year_col == "2016")
+hist(inc_acc16$ugC_gsoil_day, breaks = 100)
+
+lm <- lm(ugC_gsoil_day ~ treatment*soiltype, data=inc_acc16)
+anova(lm) # no interaction, just impact of soiltype (keep treatment in model)
+
+lm1 <- lm(ugC_gsoil_day ~ treatment + soiltype , data=inc_acc16)
+anova(lm1)
+hist(resid(lm1)) # also do want to incorporate the block as a random effect.
+
+lmm16_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment + soiltype + (1|replicate), data = inc_acc16)
+anova(lmm16_rate)
+hist(resid(lmm16_rate))
+simulateResiduals(lmm16_rate, plot = TRUE) # almost there, but not quite
+
+lmm16_2_rate <- lmerTest::lmer(log(ugC_gsoil_day) ~ treatment + soiltype + (1|replicate), data=inc_acc16)
+# look at ANOVA table for Type I (sequential type I anova table) from lmerTest package for analyzing LMER objects
+anova(lmm16_2_rate) # effect of both treatment and soiltype in this model
+
+summary(lmm16_2_rate)
+hist(resid(lmm16_2_rate))
+simulateResiduals(lmm16_2_rate, plot = TRUE) # okay things look good.  moving on.  both treatment and soiltype effect on soils from 2016.
+
+# tukey's post-hoc tests to determine effects of treatment (tukey is default):
+e2016 <- emmeans(lmm16_2_rate,
+                 specs = pairwise ~ soiltype|treatment, # compare across treatment + soiltype
+                 type = "response")  # convert back from log transformation
+e2016$emmeans     # examine modeled means
+e2016$contrasts   # examine p-values of pairwise comparisons
+
+# note: did the below comparison with just treatment too, and no individual comparison was statistically significant to p < 0.05 (though MWC/C was close)
+
+# okay within-gropu comparison was illuminating re: feature. Now just do feature:
+e2016_2 <- emmeans(lmm16_2_rate,
+                   specs = pairwise ~ "soiltype",
+                   type = "response")
+e2016_2$emmeans
+e2016_2$contrasts
+```
+
+Collected in 2018/incubated in 2018:
+```{r analyze_rate_2016}
+inc_acc18 <- inc_acc %>% 
+  filter(year_col == "2018")
+hist(inc_acc18$ugC_gsoil_day, breaks = 100)
+
+lm <- lm(ugC_gsoil_day ~ treatment*soiltype, data=inc_acc18)
+anova(lm) # interaction, and individual impacts of both fixed effects
+
+lmm18_rate <- lmerTest::lmer(ugC_gsoil_day ~ treatment*soiltype + (1|replicate), data = inc_acc18)
+anova(lmm18_rate)
+hist(resid(lmm18_rate), breaks = 100)
+simulateResiduals(lmm18_rate, plot = TRUE) # almost there, but not quite
+
+lmm18_2_rate <- lmerTest::lmer(log(ugC_gsoil_day) ~ treatment*soiltype + (1|replicate), data=inc_acc18)
+# look at ANOVA table for Type I (sequential type I anova table) from lmerTest package for analyzing LMER objects
+anova(lmm18_2_rate, type=c("I")) # effect of treatment, soiltype, and the interaction in 2018
+
+summary(lmm18_2_rate)
+hist(resid(lmm18_2_rate), breaks = 100)
+qqnorm(resid(lmm18_2_rate))
+simulateResiduals(lmm18_2_rate, plot = TRUE) # Hmm; despite looking okay in terms of qqplot and relatively normal-looking residuals, both DHARMa tests are showing deviations from the norm. Gonna go with this model for now anyway (Aug 3rd, 2021) because it otherwise looks ok.
+plotResiduals(lmm18_2_rate)
+
+##########################
+# tukey's post-hoc tests to determine effects of treatment (tukey is default):
+e2018 <- emmeans(lmm18_2_rate,
+                 specs = pairwise ~ soiltype|treatment, # compare across treatment + soiltype
+                 type = "response")  # convert back from log transformation
+e2018$emmeans     # examine modeled means
+e2018$contrasts   # examine p-values of pairwise comparisons
+
+e2018_3 <- emmeans(lmm18_2_rate,
+                   specs = pairwise ~ treatment,
+                   type = "response")
+e2018_3$emmeans
+e2018_3$contrasts
+
+# okay within-gropu comparison was illuminating re: feature. Now just do feature:
+e2018_2 <- emmeans(lmm18_2_rate,
+                   specs = pairwise ~ "soiltype",
+                   type = "response")
+e2018_2$emmeans
+e2018_2$contrasts
+
+```
+
+Interaction plot for 2018:
+```{r 2018_interaction}
+interaction.plot(
+  x.factor = inc_acc18$treatment,
+  trace.factor = inc_acc18$soiltype,
+  response = inc_acc18$ugC_gsoil_day,
+  fun = median,
+  ylab = expression(paste("carbon accumulated " (mu*"g/g soil"))),
+  xlab = "treatment",
+  trace.label = "soil type",
+  lwd = 3,
+  col = c("#E69F00", "#009E73", "#D55E00")
+)
+
+mypalette <- c("#E69F00", "#009E73", "#D55E00")
+
+plot_model(lmm18_2_rate, type = "pred", terms = c("treatment", "soiltype"))+
+  theme_classic()+
+  scale_color_manual(values = mypalette) #color-blind friendly palette
+  
+
+# both methods of producing a plot demonstrate an interaction between treatment and soiltype, but just for OM and OS soils; not UT.
+# - OS soils always have lower rates of mineralization than OM *except* in MW plots, where the relationship is switched.
+# - no matter what, UT soils have the highest rate of interaction
+```
+
